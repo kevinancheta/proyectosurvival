@@ -27,6 +27,7 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 
 - `scenes/main.tscn`: escena principal.
 - `scripts/main.gd`: genera el terreno, los árboles y las rocas, y crea al jugador. Las constantes de arriba (tamaño del mundo, cantidad de árboles, altura de las colinas) se pueden cambiar.
+- `scripts/tree_factory.gd`: fabrica los árboles (pinos, robles, secos) y arbustos con formas irregulares.
 - `scripts/player.gd`: jugador en primera persona.
 - `scripts/day_night.gd`: ciclo de día y noche (dura 10 minutos reales por día).
 

@@ -4,11 +4,13 @@ extends Node3D
 
 const PlayerScript := preload("res://scripts/player.gd")
 const DayNightScript := preload("res://scripts/day_night.gd")
+const TreeFactory := preload("res://scripts/tree_factory.gd")
 
 const WORLD_SIZE := 500.0   # metros por lado
 const GRID := 200           # cuadros por lado (más cuadros = terreno más detallado)
 const HILL_HEIGHT := 14.0   # altura de las colinas en metros
 const TREE_COUNT := 600
+const BUSH_COUNT := 350
 const ROCK_COUNT := 200
 const CLEARING_RADIUS := 25.0  # claro plano donde aparece el jugador
 
@@ -122,14 +124,29 @@ func _terrain_color(h: float, n: Vector3) -> Color:
 func _scatter_nature() -> void:
 	var limit := WORLD_SIZE / 2.0 - 50.0
 
-	var trunk_xf: Array[Transform3D] = []
-	var low_cone_xf: Array[Transform3D] = []
-	var high_cone_xf: Array[Transform3D] = []
+	# --- Árboles: varias formas distintas (3 pinos, 2 robles, 1 seco) para que no se repitan.
+	var meshes: Array[Mesh] = []
+	for i in 3:
+		meshes.append(TreeFactory.make_pine(randi()))
+	for i in 2:
+		meshes.append(TreeFactory.make_oak(randi()))
+	meshes.append(TreeFactory.make_dead(randi()))
+
+	var xforms: Array = []
+	var tints: Array = []
+	for i in meshes.size():
+		xforms.append([])
+		tints.append([])
+
+	var pine_shape := CylinderShape3D.new()
+	pine_shape.radius = 0.5
+	pine_shape.height = 6.0
+	var oak_shape := CylinderShape3D.new()
+	oak_shape.radius = 0.75
+	oak_shape.height = 4.0
+
 	var tree_body := StaticBody3D.new()
 	tree_body.name = "TreeColliders"
-	var trunk_shape := CylinderShape3D.new()
-	trunk_shape.radius = 0.5
-	trunk_shape.height = 6.0
 
 	var placed := 0
 	var attempts := 0
@@ -146,47 +163,61 @@ func _scatter_nature() -> void:
 			continue
 
 		var y := height_at(x, z)
+		var roll := randf()
+		var kind := randi() % 3        # pinos
+		var shape := pine_shape
+		if roll < 0.04:
+			kind = 5                   # árbol seco
+		elif y < 2.5 and roll < 0.55:
+			kind = 3 + randi() % 2     # robles en las partes bajas
+			shape = oak_shape
+
 		var s := randf_range(0.8, 1.5)
-		var yaw := randf() * TAU
-		var basis := Basis(Vector3.UP, yaw).scaled(Vector3(s, s, s))
-		trunk_xf.append(Transform3D(basis, Vector3(x, y + 1.5 * s, z)))
-		low_cone_xf.append(Transform3D(basis, Vector3(x, y + 4.2 * s, z)))
-		high_cone_xf.append(Transform3D(basis, Vector3(x, y + 6.2 * s, z)))
+		var basis := Basis(Vector3.UP, randf() * TAU) \
+			* Basis(Vector3.RIGHT, randf_range(-0.05, 0.05)) \
+			* Basis(Vector3.BACK, randf_range(-0.05, 0.05)) \
+			* Basis.from_scale(Vector3(s, s, s))
+		xforms[kind].append(Transform3D(basis, Vector3(x, y, z)))
+		tints[kind].append(Color(randf_range(0.85, 1.0), randf_range(0.88, 1.0), randf_range(0.82, 0.98)))
 
 		var cs := CollisionShape3D.new()
-		cs.shape = trunk_shape
-		cs.position = Vector3(x, y + 3.0, z)
+		cs.shape = shape
+		cs.position = Vector3(x, y + shape.height * 0.5, z)
 		tree_body.add_child(cs)
 		placed += 1
 
 	add_child(tree_body)
 
-	var trunk_mesh := CylinderMesh.new()
-	trunk_mesh.top_radius = 0.3
-	trunk_mesh.bottom_radius = 0.45
-	trunk_mesh.height = 3.0
-	trunk_mesh.radial_segments = 6
-	trunk_mesh.rings = 1
+	var tree_mat := TreeFactory.make_material()
+	for i in meshes.size():
+		_add_multimesh(meshes[i], tree_mat, xforms[i], tints[i])
 
-	var low_cone := CylinderMesh.new()
-	low_cone.top_radius = 0.0
-	low_cone.bottom_radius = 2.4
-	low_cone.height = 4.0
-	low_cone.radial_segments = 7
-	low_cone.rings = 1
+	# --- Arbustos (sin colisión, para decorar el suelo del bosque)
+	var bush_meshes: Array[Mesh] = [TreeFactory.make_bush(randi()), TreeFactory.make_bush(randi())]
+	var bush_xf: Array = [[], []]
+	var bush_tint: Array = [[], []]
+	var bushes := 0
+	attempts = 0
+	while bushes < BUSH_COUNT and attempts < BUSH_COUNT * 20:
+		attempts += 1
+		var x := randf_range(-limit, limit)
+		var z := randf_range(-limit, limit)
+		if Vector2(x, z).length() < 10.0:
+			continue
+		if _forest_noise.get_noise_2d(x, z) < -0.25:
+			continue
+		if normal_at(x, z).y < 0.85 or height_at(x, z) > 10.0:
+			continue
+		var k := randi() % 2
+		var s := randf_range(0.8, 1.6)
+		var basis := Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(s, s, s))
+		bush_xf[k].append(Transform3D(basis, Vector3(x, height_at(x, z), z)))
+		bush_tint[k].append(Color(randf_range(0.8, 1.0), randf_range(0.85, 1.05), randf_range(0.8, 1.0)))
+		bushes += 1
+	for k in 2:
+		_add_multimesh(bush_meshes[k], tree_mat, bush_xf[k], bush_tint[k])
 
-	var high_cone := CylinderMesh.new()
-	high_cone.top_radius = 0.0
-	high_cone.bottom_radius = 1.7
-	high_cone.height = 3.2
-	high_cone.radial_segments = 7
-	high_cone.rings = 1
-
-	_add_multimesh(trunk_mesh, Color(0.36, 0.24, 0.14), trunk_xf)
-	_add_multimesh(low_cone, Color(0.12, 0.35, 0.16), low_cone_xf)
-	_add_multimesh(high_cone, Color(0.16, 0.42, 0.20), high_cone_xf)
-
-	# Rocas
+	# --- Rocas
 	var rock_xf: Array[Transform3D] = []
 	var rock_body := StaticBody3D.new()
 	rock_body.name = "RockColliders"
@@ -220,20 +251,25 @@ func _scatter_nature() -> void:
 	rock_mesh.height = 2.0
 	rock_mesh.radial_segments = 6
 	rock_mesh.rings = 4
-	_add_multimesh(rock_mesh, Color(0.48, 0.47, 0.46), rock_xf)
+	var rock_mat := StandardMaterial3D.new()
+	rock_mat.albedo_color = Color(0.48, 0.47, 0.46)
+	rock_mat.roughness = 1.0
+	_add_multimesh(rock_mesh, rock_mat, rock_xf)
 
 
-func _add_multimesh(mesh: Mesh, color: Color, transforms: Array[Transform3D]) -> void:
+## Dibuja muchas copias de una malla de una sola vez (rápido). Si se pasan colores, cada copia lleva el suyo.
+func _add_multimesh(mesh: Mesh, mat: Material, transforms: Array, colors: Array = []) -> void:
+	if transforms.is_empty():
+		return
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = not colors.is_empty()
 	mm.mesh = mesh
 	mm.instance_count = transforms.size()
 	for i in transforms.size():
 		mm.set_instance_transform(i, transforms[i])
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 1.0
+		if mm.use_colors:
+			mm.set_instance_color(i, colors[i])
 
 	var instance := MultiMeshInstance3D.new()
 	instance.multimesh = mm
