@@ -21,20 +21,32 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 | Mouse | Mirar |
 | Shift | Correr |
 | Espacio | Saltar |
+| Clic izquierdo (mantenido) | Golpear: talar árboles y picar rocas |
 | Esc | Soltar el mouse (clic para volver a capturarlo) |
+
+## Recolección
+
+- Apuntá a un árbol o una roca con la mira: aparece "Clic izquierdo: Talar árbol" o "Picar roca".
+- Un árbol aguanta 6 golpes, se sacude, cae y suelta 2 a 4 troncos. Queda el tocón.
+- Cada golpe a una roca suelta una piedra y la roca se achica. A los 4 golpes se rompe y suelta 2 más.
+- Los troncos y las piedras sueltos se recogen caminando cerca. La mochila está abajo a la izquierda.
 
 ## Estructura
 
 - `scenes/main.tscn`: escena principal.
 - `scripts/main.gd`: genera el terreno, los árboles y las rocas, y crea al jugador. Las constantes de arriba (tamaño del mundo, cantidad de árboles, altura de las colinas) se pueden cambiar.
 - `scripts/tree_factory.gd`: fabrica los árboles (pinos, robles, secos) y arbustos con formas irregulares.
-- `scripts/player.gd`: jugador en primera persona.
+- `scripts/player.gd`: jugador en primera persona, golpes con el hacha y mochila.
+- `scripts/harvestable.gd`: lógica de cada árbol y roca (golpes, caída, drops).
+- `scripts/pickup.gd`: troncos y piedras sueltos en el suelo.
+- `scripts/inventory.gd`: la mochila (cuántos objetos de cada tipo).
+- `tests/harvest_test.gd`: prueba automática de la recolección. Se corre con `godot --headless --path . -s res://tests/harvest_test.gd`. Los avisos `mesh_get_surface_count` que salen en ese modo son normales (no hay pantalla) y no afectan al juego.
 - `scripts/day_night.gd`: ciclo de día y noche (dura 10 minutos reales por día).
 
 ## Plan
 
 1. [x] Mundo base: terreno, bosque, jugador y ciclo de día y noche.
-2. [ ] Recolección: talar árboles, picar rocas, inventario.
+2. [x] Recolección: talar árboles, picar rocas, inventario.
 3. [ ] Construcción tipo The Forest: planos, troncos y estructuras piezas por pieza.
 4. [ ] Supervivencia: hambre, sed, frío y enemigos de noche.
 5. [ ] Servidor multijugador.

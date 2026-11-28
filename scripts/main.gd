@@ -5,6 +5,7 @@ extends Node3D
 const PlayerScript := preload("res://scripts/player.gd")
 const DayNightScript := preload("res://scripts/day_night.gd")
 const TreeFactory := preload("res://scripts/tree_factory.gd")
+const HarvestableScript := preload("res://scripts/harvestable.gd")
 
 const WORLD_SIZE := 500.0   # metros por lado
 const GRID := 200           # cuadros por lado (más cuadros = terreno más detallado)
@@ -14,10 +15,21 @@ const BUSH_COUNT := 350
 const ROCK_COUNT := 200
 const CLEARING_RADIUS := 25.0  # claro plano donde aparece el jugador
 
+const TREE_HITS := 6        # golpes para talar un árbol
+const ROCK_HITS := 4        # golpes para romper una roca
+const ROCK_DROPS := 2       # piedras extra al romperla (cada golpe ya suelta una)
+# Troncos que suelta cada tipo de árbol: 3 pinos, 2 robles, 1 seco.
+const TREE_DROPS := [3, 3, 3, 4, 4, 2]
+
 var _terrain_noise := FastNoiseLite.new()
 var _forest_noise := FastNoiseLite.new()
 var _day_night
+var _player
+var _harvest_root: Node3D
 var _clock_label: Label
+var _inv_label: Label
+var _target_label: Label
+var _msg_box: VBoxContainer
 
 
 func _ready() -> void:
@@ -33,6 +45,10 @@ func _ready() -> void:
 
 	_day_night = DayNightScript.new()
 	add_child(_day_night)
+
+	_harvest_root = Node3D.new()
+	_harvest_root.name = "Harvestables"
+	add_child(_harvest_root)
 
 	_build_terrain()
 	_scatter_nature()
@@ -145,9 +161,7 @@ func _scatter_nature() -> void:
 	oak_shape.radius = 0.75
 	oak_shape.height = 4.0
 
-	var tree_body := StaticBody3D.new()
-	tree_body.name = "TreeColliders"
-
+	var tree_records: Array = []   # uno por árbol: qué forma es, cuál instancia, dónde
 	var placed := 0
 	var attempts := 0
 	while placed < TREE_COUNT and attempts < TREE_COUNT * 20:
@@ -177,20 +191,42 @@ func _scatter_nature() -> void:
 			* Basis(Vector3.RIGHT, randf_range(-0.05, 0.05)) \
 			* Basis(Vector3.BACK, randf_range(-0.05, 0.05)) \
 			* Basis.from_scale(Vector3(s, s, s))
-		xforms[kind].append(Transform3D(basis, Vector3(x, y, z)))
-		tints[kind].append(Color(randf_range(0.85, 1.0), randf_range(0.88, 1.0), randf_range(0.82, 0.98)))
-
-		var cs := CollisionShape3D.new()
-		cs.shape = shape
-		cs.position = Vector3(x, y + shape.height * 0.5, z)
-		tree_body.add_child(cs)
+		var xform := Transform3D(basis, Vector3(x, y, z))
+		var tint := Color(randf_range(0.85, 1.0), randf_range(0.88, 1.0), randf_range(0.82, 0.98))
+		xforms[kind].append(xform)
+		tints[kind].append(tint)
+		tree_records.append({
+			"kind": kind, "index": xforms[kind].size() - 1,
+			"xf": xform, "tint": tint, "shape": shape,
+		})
 		placed += 1
 
-	add_child(tree_body)
-
 	var tree_mat := TreeFactory.make_material()
+	var tree_mms: Array = []
 	for i in meshes.size():
-		_add_multimesh(meshes[i], tree_mat, xforms[i], tints[i])
+		tree_mms.append(_add_multimesh(meshes[i], tree_mat, xforms[i], tints[i]))
+
+	# Cada árbol se vuelve algo que se puede talar.
+	for r in tree_records:
+		var k: int = r["kind"]
+		var shape: CylinderShape3D = r["shape"]
+		var t: Transform3D = r["xf"]
+		var h = HarvestableScript.new()
+		h.kind = "tree"
+		h.max_hp = TREE_HITS
+		h.drops = TREE_DROPS[k]
+		h.mm = tree_mms[k]
+		h.index = r["index"]
+		h.xf = t
+		h.mesh = meshes[k]
+		h.material = tree_mat
+		h.tint = r["tint"]
+		h.position = t.origin
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		cs.position = Vector3(0.0, shape.height * 0.5, 0.0)
+		h.add_child(cs)
+		_harvest_root.add_child(h)
 
 	# --- Arbustos (sin colisión, para decorar el suelo del bosque)
 	var bush_meshes: Array[Mesh] = [TreeFactory.make_bush(randi()), TreeFactory.make_bush(randi())]
@@ -219,8 +255,7 @@ func _scatter_nature() -> void:
 
 	# --- Rocas
 	var rock_xf: Array[Transform3D] = []
-	var rock_body := StaticBody3D.new()
-	rock_body.name = "RockColliders"
+	var rock_radius: Array[float] = []
 	var rocks := 0
 	attempts = 0
 	while rocks < ROCK_COUNT and attempts < ROCK_COUNT * 20:
@@ -235,16 +270,8 @@ func _scatter_nature() -> void:
 		var sz := randf_range(0.8, 2.4)
 		var basis := Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(sx, sy, sz))
 		rock_xf.append(Transform3D(basis, Vector3(x, y + sy * 0.3, z)))
-
-		var sphere := SphereShape3D.new()
-		sphere.radius = maxf(sx, sz) * 0.85
-		var cs := CollisionShape3D.new()
-		cs.shape = sphere
-		cs.position = Vector3(x, y + sy * 0.3, z)
-		rock_body.add_child(cs)
+		rock_radius.append(maxf(sx, sz) * 0.85)
 		rocks += 1
-
-	add_child(rock_body)
 
 	var rock_mesh := SphereMesh.new()
 	rock_mesh.radius = 1.0
@@ -254,13 +281,29 @@ func _scatter_nature() -> void:
 	var rock_mat := StandardMaterial3D.new()
 	rock_mat.albedo_color = Color(0.48, 0.47, 0.46)
 	rock_mat.roughness = 1.0
-	_add_multimesh(rock_mesh, rock_mat, rock_xf)
+	var rock_mm := _add_multimesh(rock_mesh, rock_mat, rock_xf)
+
+	for i in rock_xf.size():
+		var h = HarvestableScript.new()
+		h.kind = "rock"
+		h.max_hp = ROCK_HITS
+		h.drops = ROCK_DROPS
+		h.mm = rock_mm
+		h.index = i
+		h.xf = rock_xf[i]
+		h.position = rock_xf[i].origin
+		var sphere := SphereShape3D.new()
+		sphere.radius = rock_radius[i]
+		var cs := CollisionShape3D.new()
+		cs.shape = sphere
+		h.add_child(cs)
+		_harvest_root.add_child(h)
 
 
 ## Dibuja muchas copias de una malla de una sola vez (rápido). Si se pasan colores, cada copia lleva el suyo.
-func _add_multimesh(mesh: Mesh, mat: Material, transforms: Array, colors: Array = []) -> void:
+func _add_multimesh(mesh: Mesh, mat: Material, transforms: Array, colors: Array = []) -> MultiMesh:
 	if transforms.is_empty():
-		return
+		return null
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = not colors.is_empty()
@@ -275,15 +318,16 @@ func _add_multimesh(mesh: Mesh, mat: Material, transforms: Array, colors: Array 
 	instance.multimesh = mm
 	instance.material_override = mat
 	add_child(instance)
+	return mm
 
 
 # ------------------------------------------------------------ jugador y HUD
 
 func _spawn_player() -> void:
-	var player := PlayerScript.new()
-	player.name = "Player"
-	player.position = Vector3(0.0, height_at(0.0, 0.0) + 2.0, 0.0)
-	add_child(player)
+	_player = PlayerScript.new()
+	_player.name = "Player"
+	_player.position = Vector3(0.0, height_at(0.0, 0.0) + 2.0, 0.0)
+	add_child(_player)
 
 
 func _build_hud() -> void:
@@ -294,13 +338,106 @@ func _build_hud() -> void:
 	layer.add_child(_clock_label)
 
 	var help := _make_label(Vector2(16, 48), 15)
-	help.text = "WASD moverte  ·  Shift correr  ·  Espacio saltar  ·  Esc soltar el mouse"
+	help.text = "WASD moverte  ·  Shift correr  ·  Espacio saltar  ·  Clic izquierdo golpear  ·  Esc soltar el mouse"
 	layer.add_child(help)
+
+	# Mira en el centro de la pantalla
+	var dot := ColorRect.new()
+	dot.color = Color(1.0, 1.0, 1.0, 0.8)
+	dot.anchor_left = 0.5
+	dot.anchor_right = 0.5
+	dot.anchor_top = 0.5
+	dot.anchor_bottom = 0.5
+	dot.offset_left = -2.0
+	dot.offset_right = 2.0
+	dot.offset_top = -2.0
+	dot.offset_bottom = 2.0
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(dot)
+
+	# Qué estás apuntando ("Talar árbol", "Picar roca")
+	_target_label = _make_label(Vector2.ZERO, 18)
+	_target_label.anchor_left = 0.5
+	_target_label.anchor_right = 0.5
+	_target_label.anchor_top = 0.5
+	_target_label.anchor_bottom = 0.5
+	_target_label.offset_left = -150.0
+	_target_label.offset_right = 150.0
+	_target_label.offset_top = 16.0
+	_target_label.offset_bottom = 44.0
+	_target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(_target_label)
+
+	# Avisos tipo "+1 Tronco"
+	_msg_box = VBoxContainer.new()
+	_msg_box.anchor_left = 0.5
+	_msg_box.anchor_right = 0.5
+	_msg_box.anchor_top = 0.72
+	_msg_box.anchor_bottom = 0.72
+	_msg_box.offset_left = -120.0
+	_msg_box.offset_right = 120.0
+	_msg_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_msg_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(_msg_box)
+
+	# Mochila, abajo a la izquierda
+	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.04, 0.55)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 14.0
+	style.content_margin_right = 14.0
+	style.content_margin_top = 10.0
+	style.content_margin_bottom = 10.0
+	panel.add_theme_stylebox_override("panel", style)
+	panel.anchor_left = 0.0
+	panel.anchor_right = 0.0
+	panel.anchor_top = 1.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = 16.0
+	panel.offset_bottom = -16.0
+	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(panel)
+	_inv_label = _make_label(Vector2.ZERO, 18)
+	panel.add_child(_inv_label)
+
+	_player.target_changed.connect(_on_target_changed)
+	_player.collected.connect(_on_collected)
+	_player.inventory.changed.connect(_refresh_inventory)
+	_refresh_inventory()
+
+
+func _on_target_changed(text: String) -> void:
+	_target_label.text = "Clic izquierdo: " + text if text != "" else ""
+
+
+func _on_collected(item: String, amount: int) -> void:
+	var label := _make_label(Vector2.ZERO, 20)
+	label.text = "+%d %s" % [amount, item]
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_msg_box.add_child(label)
+	var tw := label.create_tween()
+	tw.tween_interval(0.9)
+	tw.tween_property(label, "modulate:a", 0.0, 0.6)
+	tw.tween_callback(label.queue_free)
+
+
+func _refresh_inventory() -> void:
+	var items: Dictionary = _player.inventory.items
+	var lines := PackedStringArray(["MOCHILA"])
+	if items.is_empty():
+		lines.append("vacía")
+	else:
+		for item in items:
+			lines.append("%s  ×%d" % [item, items[item]])
+	_inv_label.text = "\n".join(lines)
 
 
 func _make_label(pos: Vector2, size: int) -> Label:
 	var label := Label.new()
 	label.position = pos
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_size_override("font_size", size)
 	label.add_theme_color_override("font_color", Color(0.95, 0.92, 0.82))
 	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
