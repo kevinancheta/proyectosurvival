@@ -6,6 +6,7 @@ extends RefCounted
 static func make_material() -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 1.0
 	return mat
 
@@ -145,6 +146,43 @@ static func make_bush(seed_value: int) -> ArrayMesh:
 		var c := Vector3(rng.randf_range(-0.5, 0.5), rng.randf_range(0.3, 0.5), rng.randf_range(-0.5, 0.5))
 		_blob(st, c, rng.randf_range(0.6, 0.95), 0.75, rng, low, high, 3, 6)
 	return st.commit()
+
+
+# ---------------------------------------------------------------- pasto
+
+## Mata de pasto: unas hojas finas inclinadas, oscuras en la base y claras en la punta.
+static func make_grass(seed_value: int) -> ArrayMesh:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var blades := 6
+	for i in blades:
+		var a := TAU * i / blades + rng.randf_range(-0.3, 0.3)
+		var dist := rng.randf_range(0.0, 0.18)
+		var base := Vector3(cos(a) * dist, 0.0, sin(a) * dist)
+		var h := rng.randf_range(0.28, 0.6)
+		var lean := Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.12, 0.12))
+		var side := Vector3(-sin(a), 0.0, cos(a)) * 0.05
+		var c0 := Color(0.17, 0.26, 0.09)
+		var c1 := Color(0.48, 0.56, 0.22)
+		var pts := [base - side, base + side, base + Vector3(0.0, h, 0.0) + lean]
+		var cols := [c0, c0, c1]
+		for k in 3:
+			st.set_normal(Vector3.UP)
+			st.set_color(cols[k])
+			st.add_vertex(pts[k])
+	return st.commit()
+
+
+## El pasto se ve de los dos lados, por eso no se descartan las caras traseras.
+static func make_grass_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.roughness = 1.0
+	return mat
 
 
 # ------------------------------------------------------------ geometría

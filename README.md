@@ -44,6 +44,11 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 - `scripts/pickup.gd`: troncos y piedras sueltos en el suelo.
 - `scripts/inventory.gd`: la mochila (cuántos objetos de cada tipo).
 - `tests/harvest_test.gd`: prueba automática de la recolección. Se corre con `godot --headless --path . -s res://tests/harvest_test.gd`. Los avisos `mesh_get_surface_count` que salen en ese modo son normales (no hay pantalla) y no afectan al juego.
+- `scripts/mesh_builder.gd`: arma modelos por código (cajas, cilindros, techos a dos aguas) con colisión.
+- `scripts/medieval_factory.gd`: casas con entramado de madera, torres, castillo con sala del trono, antorchas, fogatas, pozo, puestos de mercado, empalizadas, banderas.
+- `scripts/settlements.gd`: dónde van la aldea (70, 35), el castillo (125, -130), el camino de tierra y tres puestos de vigilancia.
+- `scripts/flicker.gd`: luz de fuego que titila.
+- `tests/structures_test.gd`: comprueba que se entra a las casas y al castillo (`godot --headless --path . -s res://tests/structures_test.gd`).
 - `scripts/day_night.gd`: ciclo de día y noche (dura 10 minutos reales por día).
 
 ## Plan

@@ -6,6 +6,7 @@ const PlayerScript := preload("res://scripts/player.gd")
 const DayNightScript := preload("res://scripts/day_night.gd")
 const TreeFactory := preload("res://scripts/tree_factory.gd")
 const HarvestableScript := preload("res://scripts/harvestable.gd")
+const SettlementsScript := preload("res://scripts/settlements.gd")
 
 const WORLD_SIZE := 500.0   # metros por lado
 const GRID := 200           # cuadros por lado (más cuadros = terreno más detallado)
@@ -13,6 +14,7 @@ const HILL_HEIGHT := 14.0   # altura de las colinas en metros
 const TREE_COUNT := 600
 const BUSH_COUNT := 350
 const ROCK_COUNT := 200
+const GRASS_COUNT := 9000   # matas de pasto repartidas por el mapa
 const CLEARING_RADIUS := 25.0  # claro plano donde aparece el jugador
 
 const TREE_HITS := 6        # golpes para talar un árbol
@@ -23,6 +25,9 @@ const TREE_DROPS := [3, 3, 3, 4, 4, 2]
 
 var _terrain_noise := FastNoiseLite.new()
 var _forest_noise := FastNoiseLite.new()
+var _color_noise := FastNoiseLite.new()
+var _site_heights: Array[float] = []   # altura plana de cada zona de Settlements.SITES
+var settlement_info := {}              # lo que devuelve Settlements.build (casas, castillo, etc.)
 var _day_night
 var _player
 var _harvest_root: Node3D
@@ -44,6 +49,15 @@ func _ready() -> void:
 	_forest_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_forest_noise.frequency = 0.012
 
+	_color_noise.seed = randi()
+	_color_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_color_noise.frequency = 0.02
+
+	# Altura plana de la aldea y del castillo (el castillo va sobre una loma).
+	for s in SettlementsScript.SITES:
+		var c: Vector2 = s["pos"]
+		_site_heights.append(base_height_at(c.x, c.y) + float(s["lift"]))
+
 	_day_night = DayNightScript.new()
 	add_child(_day_night)
 
@@ -52,7 +66,9 @@ func _ready() -> void:
 	add_child(_harvest_root)
 
 	_build_terrain()
+	settlement_info = SettlementsScript.build(self, self)
 	_scatter_nature()
+	_scatter_grass()
 	_spawn_player()
 	_build_hud()
 
@@ -65,6 +81,19 @@ func _process(_delta: float) -> void:
 
 ## Altura del terreno en un punto (x, z). Se usa para el relieve y para ubicar objetos.
 func height_at(x: float, z: float) -> float:
+	var h := base_height_at(x, z)
+	var p := Vector2(x, z)
+	for i in SettlementsScript.SITES.size():
+		var s: Dictionary = SettlementsScript.SITES[i]
+		var c: Vector2 = s["pos"]
+		var wgt := 1.0 - smoothstep(float(s["r"]), float(s["r"]) + float(s["blend"]), p.distance_to(c))
+		if wgt > 0.0:
+			h = lerpf(h, _site_heights[i], wgt)
+	return h
+
+
+## El terreno natural, sin aplanar para las construcciones.
+func base_height_at(x: float, z: float) -> float:
 	var half := WORLD_SIZE / 2.0
 	var h := _terrain_noise.get_noise_2d(x, z) * HILL_HEIGHT
 	# Claro plano en el centro, para que el jugador no aparezca dentro de una colina.
@@ -106,6 +135,7 @@ func _build_terrain() -> void:
 	var mesh := st.commit()
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 1.0
 	mesh.surface_set_material(0, mat)
 
@@ -119,7 +149,8 @@ func _build_terrain() -> void:
 func _add_triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 	# Cada triángulo con su propia normal: da el look "low-poly" facetado.
 	var n := (c - a).cross(b - a).normalized()
-	var color := _terrain_color((a.y + b.y + c.y) / 3.0, n).darkened(randf() * 0.08)
+	var color := _terrain_color((a.x + b.x + c.x) / 3.0, (a.z + b.z + c.z) / 3.0, (a.y + b.y + c.y) / 3.0, n) \
+		.darkened(randf() * 0.07)
 	var verts: Array[Vector3] = [a, b, c]
 	for v in verts:
 		st.set_normal(n)
@@ -127,13 +158,22 @@ func _add_triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 		st.add_vertex(v)
 
 
-func _terrain_color(h: float, n: Vector3) -> Color:
-	if n.y < 0.80:
-		return Color(0.42, 0.40, 0.38)  # roca en las pendientes fuertes
-	if h > 9.0:
-		return Color(0.55, 0.53, 0.50)  # cumbres peladas
-	var t := clampf((h + 4.0) / 12.0, 0.0, 1.0)
-	return Color(0.26, 0.45, 0.20).lerp(Color(0.38, 0.55, 0.24), t)
+## Color del terreno en un punto: pasto con manchas, caminos de tierra y roca en las pendientes.
+func _terrain_color(x: float, z: float, h: float, n: Vector3) -> Color:
+	var patch := _color_noise.get_noise_2d(x, z)   # -1..1, manchas grandes
+	var grass := Color(0.30, 0.40, 0.17).lerp(Color(0.43, 0.46, 0.20), clampf(patch * 0.5 + 0.5, 0.0, 1.0))
+	grass = grass.lerp(Color(0.22, 0.32, 0.14), clampf(-patch, 0.0, 1.0) * 0.45)   # zonas de musgo
+	var col := grass
+	# Caminos de tierra, con el borde irregular
+	var rd := SettlementsScript.road_distance(x, z) - _color_noise.get_noise_2d(x * 3.0, z * 3.0) * 0.9
+	var road := 1.0 - smoothstep(1.8, 3.4, rd)
+	if road > 0.0:
+		col = col.lerp(Color(0.40, 0.31, 0.20).lerp(Color(0.47, 0.38, 0.26), patch * 0.5 + 0.5), road)
+	# Pendientes: roca
+	col = col.lerp(Color(0.42, 0.39, 0.35), 1.0 - smoothstep(0.70, 0.88, n.y))
+	# Alturas grandes (las montañas del borde): piedra gris
+	col = col.lerp(Color(0.46, 0.44, 0.41), smoothstep(7.0, 14.0, h))
+	return col
 
 
 # ---------------------------------------------------------- árboles y rocas
@@ -169,7 +209,7 @@ func _scatter_nature() -> void:
 		attempts += 1
 		var x := randf_range(-limit, limit)
 		var z := randf_range(-limit, limit)
-		if Vector2(x, z).length() < CLEARING_RADIUS:
+		if Vector2(x, z).length() < CLEARING_RADIUS or SettlementsScript.blocked(x, z, 3.0):
 			continue
 		# Bosques densos donde el ruido es alto, claros donde es bajo.
 		if _forest_noise.get_noise_2d(x, z) < -0.15 and randf() > 0.15:
@@ -239,7 +279,7 @@ func _scatter_nature() -> void:
 		attempts += 1
 		var x := randf_range(-limit, limit)
 		var z := randf_range(-limit, limit)
-		if Vector2(x, z).length() < 10.0:
+		if Vector2(x, z).length() < 10.0 or SettlementsScript.blocked(x, z, 1.0):
 			continue
 		if _forest_noise.get_noise_2d(x, z) < -0.25:
 			continue
@@ -263,7 +303,7 @@ func _scatter_nature() -> void:
 		attempts += 1
 		var x := randf_range(-limit, limit)
 		var z := randf_range(-limit, limit)
-		if Vector2(x, z).length() < CLEARING_RADIUS * 0.6:
+		if Vector2(x, z).length() < CLEARING_RADIUS * 0.6 or SettlementsScript.blocked(x, z, 2.0):
 			continue
 		var y := height_at(x, z)
 		var sx := randf_range(0.8, 2.4)
@@ -299,6 +339,33 @@ func _scatter_nature() -> void:
 		cs.shape = sphere
 		h.add_child(cs)
 		_harvest_root.add_child(h)
+
+
+## Matas de pasto repartidas por el mapa (no van sobre construcciones ni caminos).
+func _scatter_grass() -> void:
+	var tufts: Array[Mesh] = [TreeFactory.make_grass(randi()), TreeFactory.make_grass(randi()), TreeFactory.make_grass(randi())]
+	var xforms: Array = [[], [], []]
+	var tints: Array = [[], [], []]
+	var limit := 215.0
+	var count := 0
+	var attempts := 0
+	while count < GRASS_COUNT and attempts < GRASS_COUNT * 6:
+		attempts += 1
+		var x := randf_range(-limit, limit)
+		var z := randf_range(-limit, limit)
+		if SettlementsScript.near_structure(x, z, 1.0) or SettlementsScript.road_distance(x, z) < 2.2:
+			continue
+		if normal_at(x, z).y < 0.85 or height_at(x, z) > 9.0:
+			continue
+		var k := randi() % 3
+		var s := randf_range(0.8, 1.7)
+		var basis := Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(s, s * randf_range(0.8, 1.3), s))
+		xforms[k].append(Transform3D(basis, Vector3(x, height_at(x, z) - 0.02, z)))
+		tints[k].append(Color(randf_range(0.75, 1.0), randf_range(0.8, 1.0), randf_range(0.7, 0.95)))
+		count += 1
+	var mat := TreeFactory.make_grass_material()
+	for k in 3:
+		_add_multimesh(tufts[k], mat, xforms[k], tints[k])
 
 
 ## Dibuja muchas copias de una malla de una sola vez (rápido). Si se pasan colores, cada copia lleva el suyo.

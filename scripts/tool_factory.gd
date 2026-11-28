@@ -12,6 +12,7 @@ static func make(tool_id: String) -> Node3D:
 	root.name = tool_id
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 1.0
 
 	_add(root, _extrude(_handle_profile(), 0.04, WOOD), mat)
