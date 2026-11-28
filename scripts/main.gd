@@ -30,6 +30,7 @@ var _clock_label: Label
 var _inv_label: Label
 var _target_label: Label
 var _msg_box: VBoxContainer
+var _slot_styles := {}   # estilo de cada casilla de herramienta, para marcar la activa
 
 
 func _ready() -> void:
@@ -338,7 +339,7 @@ func _build_hud() -> void:
 	layer.add_child(_clock_label)
 
 	var help := _make_label(Vector2(16, 48), 15)
-	help.text = "WASD moverte  ·  Shift correr  ·  Espacio saltar  ·  Clic izquierdo golpear  ·  Esc soltar el mouse"
+	help.text = "WASD moverte  ·  Shift correr  ·  Espacio saltar  ·  Clic izquierdo golpear  ·  1 / 2 / rueda cambiar herramienta  ·  Esc soltar el mouse"
 	layer.add_child(help)
 
 	# Mira en el centro de la pantalla
@@ -402,10 +403,50 @@ func _build_hud() -> void:
 	_inv_label = _make_label(Vector2.ZERO, 18)
 	panel.add_child(_inv_label)
 
+	# Herramientas, abajo al centro
+	var bar := HBoxContainer.new()
+	bar.anchor_left = 0.5
+	bar.anchor_right = 0.5
+	bar.anchor_top = 1.0
+	bar.anchor_bottom = 1.0
+	bar.offset_left = -140.0
+	bar.offset_right = 140.0
+	bar.offset_bottom = -16.0
+	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	bar.add_theme_constant_override("separation", 8)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(bar)
+	for entry in [["axe", "1  Hacha"], ["pickaxe", "2  Pico"]]:
+		var slot := PanelContainer.new()
+		var slot_style := StyleBoxFlat.new()
+		slot_style.bg_color = Color(0.05, 0.05, 0.04, 0.55)
+		slot_style.set_corner_radius_all(6)
+		slot_style.set_border_width_all(2)
+		slot_style.content_margin_left = 14.0
+		slot_style.content_margin_right = 14.0
+		slot_style.content_margin_top = 8.0
+		slot_style.content_margin_bottom = 8.0
+		slot.add_theme_stylebox_override("panel", slot_style)
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var slot_label := _make_label(Vector2.ZERO, 17)
+		slot_label.text = entry[1]
+		slot.add_child(slot_label)
+		bar.add_child(slot)
+		_slot_styles[entry[0]] = slot_style
+
 	_player.target_changed.connect(_on_target_changed)
 	_player.collected.connect(_on_collected)
+	_player.tool_changed.connect(_refresh_hotbar)
+	_refresh_hotbar(_player.current_tool)
 	_player.inventory.changed.connect(_refresh_inventory)
 	_refresh_inventory()
+
+
+func _refresh_hotbar(active: String) -> void:
+	for id in _slot_styles:
+		var style: StyleBoxFlat = _slot_styles[id]
+		style.border_color = Color(1.0, 0.82, 0.40, 1.0) if id == active else Color(1.0, 1.0, 1.0, 0.12)
 
 
 func _on_target_changed(text: String) -> void:

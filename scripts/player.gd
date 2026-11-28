@@ -1,12 +1,14 @@
 extends CharacterBody3D
 ## Jugador en primera persona. Se arma todo por código, no necesita escena propia.
 ## Controles: WASD o flechas = moverte, Shift = correr, Espacio = saltar,
-## clic izquierdo = golpear (talar, picar), Esc = soltar el mouse.
+## clic izquierdo = golpear, 1 / 2 / rueda del mouse = hacha o pico, Esc = soltar el mouse.
 
 signal target_changed(text: String)          # lo que estás apuntando ("" si nada)
 signal collected(item: String, amount: int)  # cuando recogés algo
+signal tool_changed(tool_id: String)         # cuando cambiás de herramienta
 
 const InventoryScript := preload("res://scripts/inventory.gd")
+const ToolFactory := preload("res://scripts/tool_factory.gd")
 
 @export var walk_speed: float = 5.0
 @export var sprint_speed: float = 8.5
@@ -17,17 +19,22 @@ const GRAVITY := 20.0
 const REACH := 3.4              # alcance de los golpes, en metros
 const SWING_COOLDOWN := 0.55    # segundos entre golpes
 const SWING_HIT_DELAY := 0.16   # cuándo, dentro del golpe, pega de verdad
-const TOOL_REST := Vector3(0.15, 0.0, -0.2)
+const TOOL_IDS := ["axe", "pickaxe"]
+const TOOL_POS := Vector3(0.38, -0.58, -0.62)   # dónde se ve la herramienta (relativo a la cámara)
+const TOOL_REST := Vector3(-0.2, 0.0, 0.15)     # cómo la lleva en reposo
 
 var inventory = InventoryScript.new()
+var current_tool := "axe"
 var head: Node3D
 var camera: Camera3D
 var tool_pivot: Node3D
 
+var _tools := {}
 var _pitch := 0.0
 var _spawn_position := Vector3.ZERO
 var _swing_cd := 0.0
 var _swing_tween: Tween
+var _equip_tween: Tween
 var _target_text := ""
 
 
@@ -56,7 +63,7 @@ func _ready() -> void:
 	head.add_child(camera)
 	camera.current = true
 
-	_build_tool()
+	_build_tools()
 
 	floor_snap_length = 0.5
 	_spawn_position = global_position
@@ -71,13 +78,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		head.rotation.x = _pitch
 	elif event is InputEventKey:
 		var key := event as InputEventKey
-		if key.pressed and key.keycode == KEY_ESCAPE:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		if key.pressed and not key.echo:
+			if key.keycode == KEY_ESCAPE:
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+			elif key.keycode == KEY_1:
+				equip("axe")
+			elif key.keycode == KEY_2:
+				equip("pickaxe")
 	elif event is InputEventMouseButton:
 		var click := event as InputEventMouseButton
-		if click.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-			_swing_cd = 0.4  # que el clic que vuelve al juego no cuente como golpe
+		if click.pressed:
+			if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+				if click.button_index == MOUSE_BUTTON_LEFT:
+					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+					_swing_cd = 0.4  # que el clic que vuelve al juego no cuente como golpe
+			elif click.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_cycle_tool(-1)
+			elif click.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_cycle_tool(1)
 
 
 func _physics_process(delta: float) -> void:
@@ -113,6 +131,50 @@ func collect(item: String, amount: int = 1) -> void:
 	collected.emit(item, amount)
 
 
+# ----------------------------------------------------------- herramientas
+
+func equip(tool_id: String) -> void:
+	if tool_id == current_tool or not _tools.has(tool_id):
+		return
+	current_tool = tool_id
+	_show_current_tool()
+	if _swing_tween:
+		_swing_tween.kill()
+	if _equip_tween:
+		_equip_tween.kill()
+	# La herramienta sube desde abajo de la pantalla.
+	tool_pivot.rotation = TOOL_REST
+	tool_pivot.position = TOOL_POS + Vector3(0.0, -0.3, 0.0)
+	_equip_tween = create_tween()
+	_equip_tween.tween_property(tool_pivot, "position", TOOL_POS, 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_swing_cd = 0.25
+	_target_text = "?"  # fuerza a actualizar el texto, que depende de la herramienta
+	tool_changed.emit(current_tool)
+
+
+func _cycle_tool(step: int) -> void:
+	var i := TOOL_IDS.find(current_tool)
+	equip(TOOL_IDS[(i + step + TOOL_IDS.size()) % TOOL_IDS.size()])
+
+
+func _show_current_tool() -> void:
+	for id in _tools:
+		_tools[id].visible = (id == current_tool)
+
+
+func _build_tools() -> void:
+	tool_pivot = Node3D.new()
+	tool_pivot.position = TOOL_POS
+	tool_pivot.rotation = TOOL_REST
+	camera.add_child(tool_pivot)
+	for id in TOOL_IDS:
+		var t = ToolFactory.make(id)
+		tool_pivot.add_child(t)
+		_tools[id] = t
+	_show_current_tool()
+
+
 # ---------------------------------------------------------------- golpes
 
 ## Lanza un rayo desde la cámara hacia adelante y devuelve lo que toca (vacío si nada).
@@ -129,7 +191,7 @@ func _update_target() -> void:
 	if not hit.is_empty():
 		var c = hit["collider"]
 		if c != null and c.has_method("get_prompt"):
-			text = c.get_prompt()
+			text = c.get_prompt(current_tool)
 	if text != _target_text:
 		_target_text = text
 		target_changed.emit(text)
@@ -140,7 +202,7 @@ func _start_swing() -> void:
 	if _swing_tween:
 		_swing_tween.kill()
 	_swing_tween = create_tween()
-	_swing_tween.tween_property(tool_pivot, "rotation:x", -1.2, SWING_HIT_DELAY) \
+	_swing_tween.tween_property(tool_pivot, "rotation:x", -1.3, SWING_HIT_DELAY) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	_swing_tween.tween_property(tool_pivot, "rotation:x", TOOL_REST.x, 0.3) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -153,40 +215,7 @@ func _apply_hit() -> void:
 		return
 	var c = hit["collider"]
 	if c != null and c.has_method("take_hit"):
-		c.take_hit(global_position)
-
-
-## Hacha de piedra que se ve abajo a la derecha de la pantalla.
-func _build_tool() -> void:
-	tool_pivot = Node3D.new()
-	tool_pivot.position = Vector3(0.42, -0.45, -0.6)
-	tool_pivot.rotation = TOOL_REST
-	camera.add_child(tool_pivot)
-
-	var wood := StandardMaterial3D.new()
-	wood.albedo_color = Color(0.40, 0.27, 0.15)
-	wood.roughness = 1.0
-	var rock := StandardMaterial3D.new()
-	rock.albedo_color = Color(0.50, 0.50, 0.52)
-	rock.roughness = 1.0
-
-	var handle := MeshInstance3D.new()
-	var handle_mesh := BoxMesh.new()
-	handle_mesh.size = Vector3(0.06, 0.55, 0.06)
-	handle.mesh = handle_mesh
-	handle.material_override = wood
-	handle.position = Vector3(0.0, 0.2, 0.0)
-	handle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	tool_pivot.add_child(handle)
-
-	var head_part := MeshInstance3D.new()
-	var head_mesh := BoxMesh.new()
-	head_mesh.size = Vector3(0.26, 0.13, 0.06)
-	head_part.mesh = head_mesh
-	head_part.material_override = rock
-	head_part.position = Vector3(0.1, 0.42, 0.0)
-	head_part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	tool_pivot.add_child(head_part)
+		c.take_hit(global_position, current_tool)
 
 
 # ---------------------------------------------------------------- teclas

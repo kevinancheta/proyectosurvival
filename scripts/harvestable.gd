@@ -1,14 +1,22 @@
 extends StaticBody3D
-## Un árbol o una roca que el jugador puede golpear.
+## Un árbol o una roca que el jugador puede golpear. El hacha rinde con los árboles y el pico con las rocas
+## (ver POWER); con la herramienta equivocada hacen falta más golpes.
 ## Los árboles y las rocas se dibujan todos juntos con MultiMesh (es mucho más rápido).
 ## Este nodo aporta la colisión y la lógica, y modifica su propia instancia del MultiMesh
 ## cuando lo golpean: lo sacude, lo achica o lo hace caer.
 
 const PickupScript := preload("res://scripts/pickup.gd")
 
+const EPS := 0.001
+## Cuánto avanza cada golpe según la herramienta (1.0 = la herramienta adecuada).
+const POWER := {
+	"axe": {"tree": 1.0, "rock": 0.4},
+	"pickaxe": {"tree": 0.4, "rock": 1.0},
+}
+
 var kind: String = "tree"        # "tree" o "rock"
-var max_hp: int = 6              # golpes que aguanta
-var hp: int = 6
+var max_hp: float = 6.0          # golpes que aguanta con la herramienta adecuada
+var hp: float = 6.0
 var drops: int = 3               # cuántos objetos suelta al terminar
 var mm: MultiMesh                # el MultiMesh donde se dibuja
 var index: int = 0               # qué instancia del MultiMesh es
@@ -19,6 +27,7 @@ var tint: Color = Color.WHITE
 
 var _busy := false               # ya se está cayendo o rompiendo
 var _tween: Tween
+var _stones_dropped := 0         # piedras que ya soltó esta roca
 
 
 func _ready() -> void:
@@ -26,21 +35,28 @@ func _ready() -> void:
 	hp = max_hp
 
 
-## Texto que se muestra al apuntarle.
-func get_prompt() -> String:
-	return "Talar árbol" if kind == "tree" else "Picar roca"
+func power_of(tool_id: String) -> float:
+	return float(POWER.get(tool_id, POWER["axe"])[kind])
+
+
+## Texto que se muestra al apuntarle, según la herramienta que llevás.
+func get_prompt(tool_id: String = "axe") -> String:
+	var text := "Talar árbol" if kind == "tree" else "Picar roca"
+	if power_of(tool_id) < 1.0:
+		text += " (lento, mejor con " + ("el hacha" if kind == "tree" else "el pico") + ")"
+	return text
 
 
 ## Lo llama el jugador en cada golpe. from_pos es dónde está el jugador.
-func take_hit(from_pos: Vector3) -> void:
+func take_hit(from_pos: Vector3, tool_id: String = "axe") -> void:
 	if _busy:
 		return
-	hp -= 1
+	hp -= power_of(tool_id)
 	var away := global_position - from_pos
 	away.y = 0.0
 	away = away.normalized() if away.length() > 0.01 else Vector3.RIGHT
 	if kind == "tree":
-		if hp <= 0:
+		if hp <= EPS:
 			_fell(away)
 		else:
 			_wobble(away)
@@ -127,21 +143,24 @@ func _finish_fall(falling: Node3D, away: Vector3) -> void:
 # -------------------------------------------------------------------- rocas
 
 func _chip(away: Vector3) -> void:
-	# Cada golpe suelta una piedra hacia el jugador, y la roca se achica.
+	# La roca suelta piedras a medida que se rompe, hacia el jugador. El total es el mismo
+	# con cualquier herramienta: con la equivocada solo hacen falta más golpes.
 	var toward_player := -away
-	_drop("Piedra", global_position + toward_player * 1.4 + Vector3(0.0, 1.0, 0.0),
-		toward_player * 1.5 + Vector3(randf_range(-0.5, 0.5), 2.5, randf_range(-0.5, 0.5)))
+	var broken := hp <= EPS
+	var total := int(max_hp) + drops
+	var owed := total if broken else int(clampf((max_hp - hp) / max_hp, 0.0, 1.0) * total)
+	for i in owed - _stones_dropped:
+		_drop("Piedra", global_position + toward_player * 1.4 + Vector3(0.0, 1.0 + i * 0.3, 0.0),
+			toward_player * 1.5 + Vector3(randf_range(-0.7, 0.7), 2.5, randf_range(-0.7, 0.7)))
+	_stones_dropped = owed
 
-	if hp <= 0:
+	if broken:
 		_busy = true
 		collision_layer = 0
 		_hide_instance()
-		for i in drops:
-			_drop("Piedra", global_position + toward_player * 1.4 + Vector3(0.0, 1.2 + i * 0.3, 0.0),
-				toward_player * 1.5 + Vector3(randf_range(-1.0, 1.0), 2.5, randf_range(-1.0, 1.0)))
 		queue_free()
 	else:
-		var f := 0.55 + 0.45 * float(hp) / float(max_hp)
+		var f := 0.55 + 0.45 * hp / max_hp
 		mm.set_instance_transform(index, Transform3D(xf.basis * Basis.from_scale(Vector3.ONE * f), xf.origin))
 
 

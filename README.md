@@ -22,13 +22,15 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 | Shift | Correr |
 | Espacio | Saltar |
 | Clic izquierdo (mantenido) | Golpear: talar árboles y picar rocas |
+| 1 / 2 o rueda del mouse | Cambiar entre hacha y pico |
 | Esc | Soltar el mouse (clic para volver a capturarlo) |
 
 ## Recolección
 
 - Apuntá a un árbol o una roca con la mira: aparece "Clic izquierdo: Talar árbol" o "Picar roca".
-- Un árbol aguanta 6 golpes, se sacude, cae y suelta 2 a 4 troncos. Queda el tocón.
-- Cada golpe a una roca suelta una piedra y la roca se achica. A los 4 golpes se rompe y suelta 2 más.
+- **Hacha** para la madera y **pico** para la piedra. Cada uno sirve para lo otro, pero mucho más lento: el texto de la mira avisa cuando llevás la herramienta equivocada.
+- Un árbol aguanta 6 golpes de hacha (o 15 de pico), se sacude, cae y suelta 2 a 4 troncos. Queda el tocón.
+- Una roca aguanta 4 golpes de pico (o 10 de hacha). Va soltando piedras mientras se rompe y se achica. Rinde 6 piedras en total con cualquiera de las dos herramientas.
 - Los troncos y las piedras sueltos se recogen caminando cerca. La mochila está abajo a la izquierda.
 
 ## Estructura
@@ -36,7 +38,8 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 - `scenes/main.tscn`: escena principal.
 - `scripts/main.gd`: genera el terreno, los árboles y las rocas, y crea al jugador. Las constantes de arriba (tamaño del mundo, cantidad de árboles, altura de las colinas) se pueden cambiar.
 - `scripts/tree_factory.gd`: fabrica los árboles (pinos, robles, secos) y arbustos con formas irregulares.
-- `scripts/player.gd`: jugador en primera persona, golpes con el hacha y mochila.
+- `scripts/player.gd`: jugador en primera persona, herramientas, golpes y mochila.
+- `scripts/tool_factory.gd`: modelos del hacha y el pico que se ven en pantalla.
 - `scripts/harvestable.gd`: lógica de cada árbol y roca (golpes, caída, drops).
 - `scripts/pickup.gd`: troncos y piedras sueltos en el suelo.
 - `scripts/inventory.gd`: la mochila (cuántos objetos de cada tipo).
