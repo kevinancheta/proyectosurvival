@@ -7,6 +7,7 @@ const PieceScript := preload("res://scripts/piece.gd")
 const SettlementsScript := preload("res://scripts/settlements.gd")
 
 signal info_changed(text: String)
+signal notice(text: String)      # avisos tipo "Te faltan: 3 Palo"
 
 const CELL := Catalog.CELL
 const BUILD_REACH := 9.0
@@ -70,8 +71,9 @@ func _emit_info() -> void:
 		info_changed.emit("")
 		return
 	var id := current_id()
-	info_changed.emit("%s  ·  cuesta %s\nRueda / Q cambiar pieza  ·  R girar  ·  Clic: colocar plano, después entregale materiales con el martillo" % [
-		Catalog.PIECES[id]["name"], Catalog.cost_text(id)])
+	var how := "se coloca de paja; mejorala con clic derecho" if Catalog.is_tiered(id) else "se coloca al instante"
+	info_changed.emit("%s  ·  cuesta %s  (%s)\nRueda / Q cambiar pieza  ·  R girar  ·  Clic izquierdo: colocar" % [
+		Catalog.PIECES[id]["name"], Catalog.cost_text(Catalog.cost(id, 0)), how])
 
 
 func _process(_delta: float) -> void:
@@ -83,32 +85,37 @@ func _process(_delta: float) -> void:
 
 # --------------------------------------------------------------- colocar
 
-## Intenta colocar un plano donde está el fantasma. Devuelve true si lo logró.
+## Coloca la pieza donde está el fantasma, pagándola con la mochila. Devuelve true si lo logró.
 func try_place() -> bool:
 	if not active:
 		return false
 	_current = compute()
 	if not _current["valid"]:
 		return false
-	var piece := PieceScript.new()
-	piece.name = "Piece_" + current_id()
-	piece.key = _current["key"]
-	root.add_child(piece)
-	piece.global_transform = _current["xf"]
-	piece.setup(current_id(), false)
-	if piece.key != "":
-		pieces[piece.key] = piece
-	piece.destroyed.connect(_on_piece_destroyed)
+	var id := current_id()
+	var c := Catalog.cost(id, 0)
+	var lacking := PackedStringArray()
+	for item in c:
+		var have: int = player.inventory.get_count(item)
+		if have < int(c[item]):
+			lacking.append("%d %s" % [int(c[item]) - have, item])
+	if not lacking.is_empty():
+		notice.emit("Te faltan: " + ", ".join(lacking))
+		return false
+	for item in c:
+		player.inventory.remove(item, int(c[item]))
+	place_at(id, _current["xf"], _current["key"], 0)
 	return true
 
 
-## Para pruebas y para construir sin pasar por el rayo: coloca una pieza ya terminada o como plano.
-func place_at(id: String, xf: Transform3D, key: String, as_built: bool) -> Node3D:
+## Pone una pieza ya hecha (lo usan try_place y las pruebas).
+func place_at(id: String, xf: Transform3D, key: String, tier: int = 0) -> Node3D:
 	var piece := PieceScript.new()
+	piece.name = "Piece_" + id
 	piece.key = key
 	root.add_child(piece)
 	piece.global_transform = xf
-	piece.setup(id, as_built)
+	piece.setup(id, tier)
 	if key != "":
 		pieces[key] = piece
 	piece.destroyed.connect(_on_piece_destroyed)

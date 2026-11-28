@@ -1,116 +1,85 @@
 extends Node3D
-## Una pieza construida por un jugador. Nace como "plano" (transparente, sin colisión para el
-## jugador) y se completa entregándole los materiales con el martillo.
-## Las piezas terminadas se pueden destruir con el hacha o el pico.
+## Una pieza construida por un jugador, como en Rust: se coloca de paja y con el martillo
+## (clic derecho) se mejora a madera, piedra y metal. Con el hacha o el pico se destruye.
 
 const Catalog := preload("res://scripts/build_catalog.gd")
 const PickupScript := preload("res://scripts/pickup.gd")
 
 signal destroyed(piece)
 
-const LAYER_WORLD := 1
-const LAYER_BLUEPRINT := 16    # solo lo ven los rayos, el jugador lo atraviesa
 const DAMAGE := {"axe": 15.0, "pickaxe": 8.0}
 
 var id := "floor"
+var tier := 0                  # 0 paja, 1 madera, 2 piedra, 3 metal
 var key := ""                  # casilla o borde que ocupa (lo usa el Builder)
-var built := false
-var delivered: Dictionary = {}
+var built := true
 var hp := 1.0
 var store: Dictionary = {}     # contenido, si es un cofre
 var door_open := false
 
 var _model: Node3D
 var _tween: Tween
+var _door_tween: Tween
 
 
-## Pone la pieza como plano o ya terminada.
-func setup(piece_id: String, as_built: bool) -> void:
+func setup(piece_id: String, piece_tier: int = 0) -> void:
 	id = piece_id
-	hp = float(Catalog.PIECES[id]["hp"])
-	if as_built:
-		_complete()
-	else:
-		_show_blueprint()
+	tier = piece_tier
+	hp = Catalog.max_hp(id, tier)
+	_rebuild_model()
 
 
-func cost() -> Dictionary:
-	return Catalog.PIECES[id]["cost"]
+func tier_name() -> String:
+	return Catalog.TIERS[tier] if Catalog.is_tiered(id) else ""
 
 
-func missing(item: String) -> int:
-	return int(cost().get(item, 0)) - int(delivered.get(item, 0))
+func can_upgrade() -> bool:
+	return Catalog.is_tiered(id) and tier < Catalog.TIERS.size() - 1
 
 
-func progress() -> float:
-	var total := 0
-	var done := 0
-	for item in cost():
-		total += int(cost()[item])
-		done += int(delivered.get(item, 0))
-	return float(done) / float(maxi(total, 1))
+func upgrade_cost() -> Dictionary:
+	return Catalog.cost(id, tier + 1) if can_upgrade() else {}
 
 
-# ------------------------------------------------------------- apariencia
-
-func _set_model(m: Node3D, layer: int) -> void:
+func _rebuild_model() -> void:
 	if _tween:
 		_tween.kill()
+	if _door_tween:
+		_door_tween.kill()
+	var was_open := door_open
 	if _model:
 		remove_child(_model)
 		_model.queue_free()
-	_model = m
+	_model = Catalog.make_model(id, tier)
 	add_child(_model)
 	for body in _model.find_children("*", "StaticBody3D", true, false):
-		body.collision_layer = layer
 		body.set_meta("piece", self)
-
-
-func _show_blueprint() -> void:
-	built = false
-	_set_model(Catalog.make_model(id), LAYER_BLUEPRINT)
-	# Sin fuego ni luz hasta que esté terminado.
-	for n in _model.find_children("*", "CPUParticles3D", true, false):
-		n.queue_free()
-	for n in _model.find_children("*", "OmniLight3D", true, false):
-		n.queue_free()
-	_refresh_blueprint()
-
-
-func _refresh_blueprint() -> void:
-	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.45, 0.72, 1.0, 0.30 + 0.45 * progress())
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for mi in _model.find_children("*", "MeshInstance3D", true, false):
-		mi.material_override = mat
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
-
-func _complete() -> void:
-	built = true
-	_set_model(Catalog.make_model(id), LAYER_WORLD)
+	if was_open:
+		var pivot: Node3D = _model.get_node_or_null("DoorPivot")
+		if pivot:
+			pivot.rotation.y = -1.75
 
 
 # --------------------------------------------------------- lo que ve el jugador
 
 func get_prompt(tool_id: String = "axe") -> String:
 	var pname: String = Catalog.PIECES[id]["name"]
-	if not built:
-		var parts := PackedStringArray()
-		for item in cost():
-			parts.append("%s %d/%d" % [item, int(delivered.get(item, 0)), int(cost()[item])])
-		if tool_id == "hammer":
-			return "Entregar materiales a: %s (%s)" % [pname, ", ".join(parts)]
-		return "Deshacer plano de %s (devuelve lo entregado)" % pname
-	var text := ""
-	if tool_id == "axe" or tool_id == "pickaxe":
-		text = "Destruir %s (%d%%)" % [pname, int(100.0 * hp / float(Catalog.PIECES[id]["hp"]))]
+	if Catalog.is_tiered(id):
+		pname += " de " + tier_name().to_lower()
+	var lines := PackedStringArray()
+	if tool_id == "hammer":
+		if can_upgrade():
+			lines.append("@Clic derecho: mejorar %s a %s (%s)" % [
+				pname, Catalog.TIERS[tier + 1].to_lower(), Catalog.cost_text(upgrade_cost())])
+		elif Catalog.is_tiered(id):
+			lines.append("@%s (nivel máximo)" % pname)
+	elif tool_id == "axe" or tool_id == "pickaxe":
+		lines.append("Destruir %s (%d%%)" % [pname, int(100.0 * hp / Catalog.max_hp(id, tier))])
 	if id == "door":
-		text += "\n[E] %s la puerta" % ("Cerrar" if door_open else "Abrir")
+		lines.append("@[E] %s la puerta" % ("Cerrar" if door_open else "Abrir"))
 	elif id == "chest":
-		text += "\n[E] Guardar todo / sacar todo  (%s)" % _store_text()
-	return text
+		lines.append("@[E] Guardar todo / sacar todo  (%s)" % _store_text())
+	return "\n".join(lines)
 
 
 func _store_text() -> String:
@@ -122,53 +91,47 @@ func _store_text() -> String:
 	return ", ".join(parts)
 
 
-## Lo llama el jugador en cada golpe. El martillo entrega materiales; el resto daña.
-func take_hit(from_pos: Vector3, tool_id: String = "axe") -> void:
-	var player = get_tree().get_first_node_in_group("player")
-	if not built:
-		if tool_id == "hammer":
-			_deliver(player)
-		elif tool_id == "axe" or tool_id == "pickaxe":
-			_refund_and_remove()
-		return
+## Lo llama el jugador en cada golpe con hacha o pico.
+func take_hit(_from_pos: Vector3, tool_id: String = "axe") -> void:
 	if not DAMAGE.has(tool_id):
 		return
 	hp -= float(DAMAGE[tool_id])
-	_shake()
 	if hp <= 0.001:
 		_break()
+	else:
+		_shake()
 
 
-func _deliver(player) -> void:
-	if player == null:
-		return
-	for item in cost():
-		if missing(item) > 0 and player.inventory.remove(item, 1):
-			delivered[item] = int(delivered.get(item, 0)) + 1
-			_pulse()
-			if progress() >= 1.0:
-				_complete()
-			else:
-				_refresh_blueprint()
-			return
-
-
-func _refund_and_remove() -> void:
-	for item in delivered:
-		_drop(item, int(delivered[item]))
-	_remove()
+## Mejora la pieza al siguiente nivel pagando con la mochila. Devuelve "" si salió bien,
+## o el motivo si no (para mostrarlo en pantalla).
+func try_upgrade(player) -> String:
+	if not can_upgrade():
+		return "Ya está en el nivel máximo"
+	var c := upgrade_cost()
+	var lacking := PackedStringArray()
+	for item in c:
+		if player.inventory.get_count(item) < int(c[item]):
+			lacking.append("%d %s" % [int(c[item]) - player.inventory.get_count(item), item])
+	if not lacking.is_empty():
+		return "Te faltan: " + ", ".join(lacking)
+	for item in c:
+		player.inventory.remove(item, int(c[item]))
+	tier += 1
+	hp = Catalog.max_hp(id, tier)
+	_rebuild_model()
+	_pulse()
+	return ""
 
 
 func _break() -> void:
-	# Al romperse devuelve la mitad de los materiales.
-	for item in cost():
-		_drop(item, int(cost()[item]) / 2)
+	if _tween:
+		_tween.kill()
+	# Al romperse devuelve la mitad de lo que cuesta el nivel actual.
+	var c := Catalog.cost(id, tier)
+	for item in c:
+		_drop(item, int(c[item]) / 2)
 	for item in store:
 		_drop(item, int(store[item]))
-	_remove()
-
-
-func _remove() -> void:
 	destroyed.emit(self)
 	queue_free()
 
@@ -195,22 +158,22 @@ func _shake() -> void:
 func _pulse() -> void:
 	if _tween:
 		_tween.kill()
-	_model.scale = Vector3.ONE
+	_model.scale = Vector3(1.04, 1.04, 1.04)
 	_tween = create_tween()
-	_tween.tween_property(_model, "scale", Vector3(1.03, 1.03, 1.03), 0.06)
-	_tween.tween_property(_model, "scale", Vector3.ONE, 0.08)
+	_tween.tween_property(_model, "scale", Vector3.ONE, 0.18)
 
 
 # --------------------------------------------------------------- interacción
 
 func interact(player) -> void:
-	if not built:
-		return
 	if id == "door":
 		door_open = not door_open
 		var pivot: Node3D = _model.get_node_or_null("DoorPivot")
 		if pivot:
+			if _door_tween:
+				_door_tween.kill()
 			var tw := create_tween()
+			_door_tween = tw
 			tw.tween_property(pivot, "rotation:y", -1.75 if door_open else 0.0, 0.25) \
 				.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	elif id == "chest":

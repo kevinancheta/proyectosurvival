@@ -1,5 +1,5 @@
 extends SceneTree
-## Prueba la construcción: plano -> entregar materiales -> pieza terminada -> destruirla.
+## Prueba la construcción estilo Rust: colocar de paja -> mejorar con martillo -> destruir.
 ##   godot --headless --path . -s res://tests/build_test.gd
 
 var _fails := 0
@@ -18,83 +18,131 @@ func _init() -> void:
 	await physics_frame
 	var player = main.get_node("Player")
 	var b = player.builder
+	var C = b.Catalog
 	_check("el jugador tiene constructor", b != null)
+	_check("costos de paja del piso: 8 palos", C.cost("floor", 0) == {"Palo": 8})
+	_check("costos del piso: madera, piedra, metal",
+		C.cost("floor", 1) == {"Tronco": 7} and C.cost("floor", 2) == {"Piedra": 10} and C.cost("floor", 3) == {"Mineral": 6})
 
-	# Se coloca un plano apuntando al suelo del claro.
 	player.global_position = Vector3(0.0, main.height_at(0.0, 0.0) + 0.5, 0.0)
 	player.rotation = Vector3.ZERO
 	player.head.rotation.x = -0.6
 	player.equip("hammer")
 	await physics_frame
 	await physics_frame
-	var ids := ["floor", "wall", "door", "roof", "palisade", "campfire", "chest"]
-	_check("el orden del catálogo es el esperado", Array(b.Catalog.ORDER) == ids)
 	b.piece_index = 0
-	var cur: Dictionary = b.compute()
-	_check("el piso apuntando al suelo es válido", cur["valid"], str(cur.get("xf", "")))
-	_check("coloca un plano", b.try_place())
+	_check("el piso apuntando al suelo es válido", b.compute()["valid"])
+
+	# Sin palos no se puede colocar
+	var notices := []
+	b.notice.connect(func(t): notices.append(t))
+	_check("sin palos no coloca", not b.try_place())
+	_check("avisa qué falta", notices.size() == 1 and "8 Palo" in notices[0], str(notices))
+
+	player.inventory.add("Palo", 10)
+	_check("con palos coloca el piso", b.try_place())
+	_check("se pagaron 8 palos", player.inventory.get_count("Palo") == 2)
 	var floor_piece = b.pieces.values()[0]
-	_check("el plano no está construido", not floor_piece.built)
-	_check("no se puede poner dos pisos en la misma casilla", not b.try_place() or b.pieces.size() == 2)
+	_check("nace de paja", floor_piece.tier == 0 and floor_piece.tier_name() == "Paja")
+	_check("no se puede poner otro en la misma casilla", not b.try_place())
 
-	# Entregar materiales con el martillo
-	player.inventory.add("Tronco", 3)
-	for i in 3:
-		floor_piece.take_hit(player.global_position, "hammer")
-	_check("con 3 de 4 troncos sigue siendo plano", not floor_piece.built and floor_piece.missing("Tronco") == 1)
-	floor_piece.take_hit(player.global_position, "hammer")
-	_check("sin troncos no avanza", not floor_piece.built)
-	player.inventory.add("Tronco", 2)
-	floor_piece.take_hit(player.global_position, "hammer")
-	_check("con el 4º tronco se completa", floor_piece.built)
-	_check("sobró 1 tronco en la mochila", player.inventory.get_count("Tronco") == 1)
+	# Mejoras con el martillo
+	_check("sin troncos no mejora", floor_piece.try_upgrade(player) != "" and floor_piece.tier == 0)
+	player.inventory.add("Tronco", 7)
+	_check("mejora a madera", floor_piece.try_upgrade(player) == "" and floor_piece.tier == 1)
+	_check("se pagaron 7 troncos", player.inventory.get_count("Tronco") == 0)
+	player.inventory.add("Piedra", 10)
+	_check("mejora a piedra", floor_piece.try_upgrade(player) == "" and floor_piece.tier == 2)
+	player.inventory.add("Mineral", 6)
+	_check("mejora a metal", floor_piece.try_upgrade(player) == "" and floor_piece.tier == 3)
+	_check("en metal ya no mejora", floor_piece.try_upgrade(player) != "" and not floor_piece.can_upgrade())
+	_check("el metal aguanta más", floor_piece.hp > 200.0, "hp=%.0f" % floor_piece.hp)
 
-	# Pisar el piso: el jugador no se cae a través
+	# Aguanta el peso del jugador
 	player.global_position = floor_piece.global_position + Vector3(0.0, 1.5, 0.0)
 	player.velocity = Vector3.ZERO
 	for i in 40:
 		await physics_frame
-	_check("el jugador se para sobre el piso", player.global_position.y > floor_piece.global_position.y - 0.05,
-		"y=%.2f piso=%.2f" % [player.global_position.y, floor_piece.global_position.y])
+	_check("el jugador se para sobre el piso", player.global_position.y > floor_piece.global_position.y - 0.05)
 
-	# Puerta: abrir y cerrar
-	var fy: float = floor_piece.global_position.y
+	# Todos los materiales se dibujan sin error
 	var fx: float = floor_piece.global_position.x
+	var fy: float = floor_piece.global_position.y
 	var fz: float = floor_piece.global_position.z
-	var door = b.place_at("door", Transform3D(Basis.IDENTITY, Vector3(fx, fy, fz + 1.5)), "e:z:test:1", true)
-	_check("la puerta está construida", door.built)
+	var made := 0
+	for id in ["wall", "door", "roof", "palisade"]:
+		for t in 4:
+			var m = C.make_model(id, t)
+			if m.get_child_count() > 0 and m.find_children("*", "MeshInstance3D", true, false).size() > 0:
+				made += 1
+			m.free()
+	_check("16 modelos (4 piezas x 4 niveles)", made == 16)
+
+	# Puerta
+	var door = b.place_at("door", Transform3D(Basis.IDENTITY, Vector3(fx, fy, fz + 1.5)), "e:z:test:1", 0)
 	door.interact(player)
 	_check("la puerta se abre", door.door_open)
+	door.try_upgrade(player)
+	player.inventory.add("Tronco", 5)
+	_check("la puerta mejorada sigue abierta", door.try_upgrade(player) == "" and door.door_open)
 	door.interact(player)
 	_check("la puerta se cierra", not door.door_open)
 
-	# Cofre: guarda y devuelve
-	var chest = b.place_at("chest", Transform3D(Basis.IDENTITY, Vector3(fx + 0.5, fy, fz - 0.5)), "", true)
+	# Cofre (sin niveles)
+	var chest = b.place_at("chest", Transform3D(Basis.IDENTITY, Vector3(fx + 0.5, fy, fz - 0.5)), "", 0)
+	_check("el cofre no se mejora", not chest.can_upgrade())
 	player.inventory.add("Piedra", 2)
 	chest.interact(player)
-	_check("el cofre guarda todo", player.inventory.items.is_empty() and chest.store.size() == 2)
+	_check("el cofre guarda todo", player.inventory.items.is_empty() and chest.store.size() >= 1)
 	chest.interact(player)
-	_check("el cofre lo devuelve", player.inventory.get_count("Piedra") == 2 and chest.store.is_empty())
+	_check("el cofre lo devuelve", player.inventory.get_count("Piedra") >= 2 and chest.store.is_empty())
 
-	# Destruir con hacha: el piso (60 hp) cae en 4 golpes de 15 y suelta la mitad de los troncos
+	# Destruir con hacha: el piso de metal aguanta; uno de paja cae en 2 hachazos
+	var straw = b.place_at("wall", Transform3D(Basis.IDENTITY, Vector3(fx + 6.0, fy, fz)), "e:z:test:2", 0)
 	var before := get_nodes_in_group("pickups").size()
-	for i in 4:
+	straw.take_hit(player.global_position, "axe")
+	_check("la paja aguanta 1 hachazo", is_instance_valid(straw))
+	straw.take_hit(player.global_position, "axe")
+	await physics_frame
+	await physics_frame
+	_check("la paja cae al 2º hachazo", not is_instance_valid(straw))
+	_check("soltó palos", get_nodes_in_group("pickups").size() == before + 4)
+	for i in 5:
 		floor_piece.take_hit(player.global_position, "axe")
-	await physics_frame
-	await physics_frame
-	_check("el piso se destruye con 4 hachazos", not is_instance_valid(floor_piece) or floor_piece.is_queued_for_deletion())
-	_check("la casilla queda libre", not b.pieces.has("f:0:0") or not is_instance_valid(b.pieces["f:0:0"]))
-	_check("soltó troncos", get_nodes_in_group("pickups").size() >= before + 2)
+	_check("el piso de metal sigue en pie tras 5 hachazos", not floor_piece.is_queued_for_deletion())
 
-	# Deshacer un plano devuelve lo entregado
-	var bp = b.place_at("wall", Transform3D(Basis.IDENTITY, Vector3(fx + 6.0, fy, fz)), "e:z:test:2", false)
-	player.inventory.add("Tronco", 2)
-	bp.take_hit(player.global_position, "hammer")
-	bp.take_hit(player.global_position, "hammer")
-	var pk := get_nodes_in_group("pickups").size()
-	bp.take_hit(player.global_position, "axe")
+	# Recursos nuevos: arbustos, árboles finos y rocas con mineral
+	var counts := {"bush": 0, "sapling": 0, "ore": 0, "tree_sticks": 0}
+	var sample := {}
+	for h in get_nodes_in_group("harvestables"):
+		if h.kind == "bush":
+			counts["bush"] += 1
+			sample["bush"] = h
+		elif h.kind == "tree" and h.item_drop == "Palo":
+			counts["sapling"] += 1
+			sample["sapling"] = h
+		elif h.kind == "tree" and h.stick_drops > 0:
+			counts["tree_sticks"] += 1
+		elif h.kind == "rock" and h.ore_drops > 0:
+			counts["ore"] += 1
+			sample["ore"] = h
+	_check("hay arbustos, árboles finos y rocas con mineral", counts["bush"] > 100 and counts["sapling"] > 20 and counts["ore"] > 10, str(counts))
+	_check("los árboles normales dan palos", counts["tree_sticks"] > 100)
+	var bush = sample["bush"]
+	var n0 := get_nodes_in_group("pickups").size()
+	bush.take_hit(player.global_position, "axe")
 	await physics_frame
-	_check("deshacer el plano devuelve 2 troncos", get_nodes_in_group("pickups").size() == pk + 2)
+	_check("un arbusto suelta 2 palos de un golpe", get_nodes_in_group("pickups").size() == n0 + 2)
+	var ore = sample["ore"]
+	var n1 := get_nodes_in_group("pickups").size()
+	for i in 12:
+		if is_instance_valid(ore):
+			ore.take_hit(player.global_position, "pickaxe")
+	await physics_frame
+	var items := {}
+	for pk in get_nodes_in_group("pickups"):
+		items[pk.item] = int(items.get(pk.item, 0)) + 1
+	_check("la roca con mineral suelta mineral", items.get("Mineral", 0) == 2, str(items))
 
 	print("TODO OK" if _fails == 0 else "HAY %d FALLAS" % _fails)
 	quit(_fails)

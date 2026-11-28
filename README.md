@@ -49,7 +49,7 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 - `scripts/settlements.gd`: dónde van la aldea (70, 35), el castillo (125, -130), el camino de tierra y tres puestos de vigilancia.
 - `scripts/flicker.gd`: luz de fuego que titila.
 - `tests/structures_test.gd`: comprueba que se entra a las casas y al castillo (`godot --headless --path . -s res://tests/structures_test.gd`).
-- `scripts/build_catalog.gd`, `scripts/piece.gd`, `scripts/builder.gd`: construcción. El catálogo define las piezas y su costo, `piece.gd` es cada pieza (plano, materiales, vida) y `builder.gd` el fantasma y la grilla de 3 m.
+- `scripts/build_catalog.gd`, `scripts/piece.gd`, `scripts/builder.gd`: construcción. El catálogo define las piezas, los niveles y sus costos, `piece.gd` es cada pieza (nivel, vida, mejora) y `builder.gd` el fantasma y la grilla de 3 m.
 - `tests/build_test.gd`: prueba de la construcción (`godot --headless --path . -s res://tests/build_test.gd`).
 - `scripts/day_night.gd`: ciclo de día y noche (dura 10 minutos reales por día).
 
@@ -62,9 +62,14 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 5. [ ] Servidor multijugador.
 6. [ ] Sistema de rey: trono, tributo, leyes.
 
-## Construcción (tecla 3, martillo)
-- Rueda del mouse o Q: cambiar de pieza. R: girar (techo, cofre, fogata). Clic: poner el plano.
-- Apuntá al plano con el martillo y hacé clic para entregarle troncos (y piedras) de a uno hasta completarlo.
-- Pieza: piso 4 troncos, pared 4, pared con puerta 5, techo 4, empalizada 3, fogata 2 troncos + 3 piedras, cofre 5.
+## Construcción (tecla 3, martillo) — estilo Rust
+- Rueda del mouse o Q: elegir pieza. R: girar. Clic izquierdo: colocarla (siempre de **paja**, se paga al instante).
+- Clic derecho apuntando a una pieza: mejorarla al siguiente nivel: paja → madera → piedra → metal.
+- Cada nivel se paga con un material: Paja = Palos, Madera = Troncos, Piedra = Piedras, Metal = Mineral.
+- Piso y pared (base 8): 8 palos / 7 troncos / 10 piedras / 6 mineral. Puerta y empalizada (base 6), techo (base 8). Fogata (2 troncos + 3 piedras) y cofre (5 troncos) no se mejoran.
+- Aguante: paja ×0.5, madera ×1, piedra ×2.5, metal ×4. Hacha o pico rompen la pieza y devuelven la mitad de su costo.
 - E: abrir/cerrar puertas y usar el cofre (guarda todo o saca todo).
-- Hacha o pico sobre una pieza terminada la rompe y devuelve la mitad de los materiales; sobre un plano lo deshace.
+
+## Recursos
+- Palos: arbustos (1 golpe), árboles finos (2 golpes) y también los árboles normales.
+- Troncos: árboles normales. Piedras: rocas. Mineral: las rocas rojizas (pico).

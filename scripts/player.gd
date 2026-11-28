@@ -102,6 +102,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				if click.button_index == MOUSE_BUTTON_LEFT:
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 					_swing_cd = 0.4  # que el clic que vuelve al juego no cuente como golpe
+			elif click.button_index == MOUSE_BUTTON_RIGHT and current_tool == "hammer":
+				_hammer_upgrade()
 			elif click.button_index == MOUSE_BUTTON_WHEEL_UP:
 				if current_tool == "hammer":
 					builder.cycle(-1)
@@ -256,14 +258,28 @@ func _start_swing() -> void:
 	get_tree().create_timer(SWING_HIT_DELAY).timeout.connect(_apply_hit)
 
 
-## Martillo: si apuntás un plano le entrega materiales; si no, intenta colocar uno nuevo.
+## Martillo, clic izquierdo: coloca la pieza que elegiste (de paja).
 func _hammer_click() -> void:
-	var hit := _cast()
-	var target = _target_of(hit["collider"]) if not hit.is_empty() else null
-	if target != null and "built" in target and not target.built:
-		_start_swing()
-	elif builder.try_place():
+	if builder.try_place():
 		_start_swing_visual()
+	else:
+		_swing_cd = 0.4
+
+
+## Martillo, clic derecho: mejora la pieza que apuntás al siguiente nivel.
+func _hammer_upgrade() -> void:
+	var hit := _cast()
+	if hit.is_empty():
+		return
+	var target = _target_of(hit["collider"])
+	if target == null or not target.has_method("try_upgrade"):
+		return
+	var problem: String = target.try_upgrade(self)
+	if problem == "":
+		_start_swing_visual()
+		_target_text = "?"   # que se actualice el texto con el nuevo nivel
+	else:
+		builder.notice.emit(problem)
 
 
 func _start_swing_visual() -> void:

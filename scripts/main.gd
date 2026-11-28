@@ -193,6 +193,8 @@ func _scatter_nature() -> void:
 	for i in 2:
 		meshes.append(TreeFactory.make_oak(randi()))
 	meshes.append(TreeFactory.make_dead(randi()))
+	for i in 2:
+		meshes.append(TreeFactory.make_sapling(randi()))   # árboles finos: dan palos
 
 	var xforms: Array = []
 	var tints: Array = []
@@ -206,6 +208,10 @@ func _scatter_nature() -> void:
 	var oak_shape := CylinderShape3D.new()
 	oak_shape.radius = 0.75
 	oak_shape.height = 4.0
+
+	var sapling_shape := CylinderShape3D.new()
+	sapling_shape.radius = 0.3
+	sapling_shape.height = 3.0
 
 	var tree_records: Array = []   # uno por árbol: qué forma es, cuál instancia, dónde
 	var placed := 0
@@ -231,6 +237,10 @@ func _scatter_nature() -> void:
 		elif y < 2.5 and roll < 0.55:
 			kind = 3 + randi() % 2     # robles en las partes bajas
 			shape = oak_shape
+
+		if kind != 5 and randf() < 0.22:
+			kind = 6 + randi() % 2     # árbol fino
+			shape = sapling_shape
 
 		var s := randf_range(0.8, 1.5)
 		var basis := Basis(Vector3.UP, randf() * TAU) \
@@ -259,8 +269,15 @@ func _scatter_nature() -> void:
 		var t: Transform3D = r["xf"]
 		var h = HarvestableScript.new()
 		h.kind = "tree"
-		h.max_hp = TREE_HITS
-		h.drops = TREE_DROPS[k]
+		if k >= 6:
+			h.max_hp = 2.0
+			h.drops = 4
+			h.item_drop = "Palo"
+			h.label = "Talar árbol fino (palos)"
+		else:
+			h.max_hp = TREE_HITS
+			h.drops = TREE_DROPS[k]
+			h.stick_drops = 2
 		h.mm = tree_mms[k]
 		h.index = r["index"]
 		h.xf = t
@@ -278,6 +295,7 @@ func _scatter_nature() -> void:
 	var bush_meshes: Array[Mesh] = [TreeFactory.make_bush(randi()), TreeFactory.make_bush(randi())]
 	var bush_xf: Array = [[], []]
 	var bush_tint: Array = [[], []]
+	var bush_records: Array = []
 	var bushes := 0
 	attempts = 0
 	while bushes < BUSH_COUNT and attempts < BUSH_COUNT * 20:
@@ -294,14 +312,40 @@ func _scatter_nature() -> void:
 		var s := randf_range(0.8, 1.6)
 		var basis := Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(s, s, s))
 		bush_xf[k].append(Transform3D(basis, Vector3(x, height_at(x, z), z)))
+		bush_records.append({"k": k, "index": bush_xf[k].size() - 1, "xf": bush_xf[k][-1], "s": s})
 		bush_tint[k].append(Color(randf_range(0.8, 1.0), randf_range(0.85, 1.05), randf_range(0.8, 1.0)))
 		bushes += 1
+	var bush_mms: Array = []
 	for k in 2:
-		_add_multimesh(bush_meshes[k], tree_mat, bush_xf[k], bush_tint[k])
+		bush_mms.append(_add_multimesh(bush_meshes[k], tree_mat, bush_xf[k], bush_tint[k]))
+	# Los arbustos se cortan con cualquier herramienta y dan palos. Su colisión está en la capa 16:
+	# la ven los golpes pero el jugador la atraviesa.
+	for r in bush_records:
+		var bk: int = r["k"]
+		if bush_mms[bk] == null:
+			continue
+		var bt: Transform3D = r["xf"]
+		var bh = HarvestableScript.new()
+		bh.kind = "bush"
+		bh.drops = 2
+		bh.mm = bush_mms[bk]
+		bh.index = r["index"]
+		bh.xf = bt
+		bh.position = bt.origin
+		bh.collision_layer = 16
+		var bs := SphereShape3D.new()
+		bs.radius = 0.7 * float(r["s"])
+		var bcs := CollisionShape3D.new()
+		bcs.shape = bs
+		bcs.position = Vector3(0.0, 0.5, 0.0)
+		bh.add_child(bcs)
+		_harvest_root.add_child(bh)
 
 	# --- Rocas
 	var rock_xf: Array[Transform3D] = []
 	var rock_radius: Array[float] = []
+	var rock_color: Array = []
+	var rock_ore: Array[bool] = []
 	var rocks := 0
 	attempts = 0
 	while rocks < ROCK_COUNT and attempts < ROCK_COUNT * 20:
@@ -317,6 +361,10 @@ func _scatter_nature() -> void:
 		var basis := Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(sx, sy, sz))
 		rock_xf.append(Transform3D(basis, Vector3(x, y + sy * 0.3, z)))
 		rock_radius.append(maxf(sx, sz) * 0.85)
+		var is_ore := randf() < 0.22   # roca con mineral: más oscura y rojiza
+		rock_ore.append(is_ore)
+		var g := randf_range(0.92, 1.05)
+		rock_color.append(Color(0.40 * g, 0.27 * g, 0.24 * g) if is_ore else Color(0.48 * g, 0.47 * g, 0.46 * g))
 		rocks += 1
 
 	var rock_mesh := SphereMesh.new()
@@ -325,15 +373,19 @@ func _scatter_nature() -> void:
 	rock_mesh.radial_segments = 6
 	rock_mesh.rings = 4
 	var rock_mat := StandardMaterial3D.new()
-	rock_mat.albedo_color = Color(0.48, 0.47, 0.46)
+	rock_mat.vertex_color_use_as_albedo = true
+	rock_mat.vertex_color_is_srgb = true
 	rock_mat.roughness = 1.0
-	var rock_mm := _add_multimesh(rock_mesh, rock_mat, rock_xf)
+	var rock_mm := _add_multimesh(rock_mesh, rock_mat, rock_xf, rock_color)
 
 	for i in rock_xf.size():
 		var h = HarvestableScript.new()
 		h.kind = "rock"
 		h.max_hp = ROCK_HITS
 		h.drops = ROCK_DROPS
+		if rock_ore[i]:
+			h.ore_drops = 2
+			h.label = "Picar roca con mineral"
 		h.mm = rock_mm
 		h.index = i
 		h.xf = rock_xf[i]
@@ -523,6 +575,7 @@ func _build_hud() -> void:
 	_player.target_changed.connect(_on_target_changed)
 	_player.collected.connect(_on_collected)
 	_player.tool_changed.connect(_refresh_hotbar)
+	_player.builder.notice.connect(_show_message)
 	_player.builder.info_changed.connect(func(t: String): _build_label.text = t)
 	_refresh_hotbar(_player.current_tool)
 	_player.inventory.changed.connect(_refresh_inventory)
@@ -540,15 +593,23 @@ func _on_target_changed(text: String) -> void:
 		_target_label.text = ""
 		return
 	# La primera línea es la acción del clic; las siguientes (por ejemplo "[E] Abrir") van tal cual.
+	# Las líneas que empiezan con "@" se muestran tal cual.
 	var lines := text.split("\n")
-	if lines[0] != "":
-		lines[0] = "Clic izquierdo: " + lines[0]
+	for i in lines.size():
+		if lines[i].begins_with("@"):
+			lines[i] = lines[i].substr(1)
+		elif i == 0 and lines[i] != "":
+			lines[i] = "Clic izquierdo: " + lines[i]
 	_target_label.text = "\n".join(lines).strip_edges()
 
 
 func _on_collected(item: String, amount: int) -> void:
+	_show_message("+%d %s" % [amount, item])
+
+
+func _show_message(text: String) -> void:
 	var label := _make_label(Vector2.ZERO, 20)
-	label.text = "+%d %s" % [amount, item]
+	label.text = text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_msg_box.add_child(label)
 	var tw := label.create_tween()

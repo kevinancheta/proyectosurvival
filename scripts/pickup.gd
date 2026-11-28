@@ -37,6 +37,20 @@ func _ready() -> void:
 		box.size = Vector3(0.9, 0.32, 0.32)
 		cs.shape = box
 		mass = 2.0
+	elif item == "Palo":
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.035
+		cyl.bottom_radius = 0.045
+		cyl.height = 0.75
+		cyl.radial_segments = 5
+		cyl.rings = 1
+		mi.mesh = cyl
+		mi.rotation_degrees = Vector3(0.0, 0.0, 90.0)
+		mat.albedo_color = Color(0.62, 0.48, 0.24)
+		var box := BoxShape3D.new()
+		box.size = Vector3(0.75, 0.12, 0.12)
+		cs.shape = box
+		mass = 0.3
 	else:
 		var sph := SphereMesh.new()
 		sph.radius = 0.22
@@ -45,7 +59,7 @@ func _ready() -> void:
 		sph.rings = 3
 		mi.mesh = sph
 		mi.scale = Vector3(1.0, 0.8, 0.9)
-		mat.albedo_color = Color(0.52, 0.51, 0.50)
+		mat.albedo_color = Color(0.72, 0.38, 0.24) if item == "Mineral" else Color(0.52, 0.51, 0.50)
 		var ball := SphereShape3D.new()
 		ball.radius = 0.2
 		cs.shape = ball

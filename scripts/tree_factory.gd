@@ -134,6 +134,33 @@ static func make_dead(seed_value: int) -> ArrayMesh:
 
 # --------------------------------------------------------------- arbusto
 
+## Árbol fino: tronco delgado y una copa chica. Se tala de pocos golpes y da palos.
+static func make_sapling(seed_value: int) -> ArrayMesh:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var h := rng.randf_range(2.6, 3.4)
+	var lean := Vector3(rng.randf_range(-0.2, 0.2), 0.0, rng.randf_range(-0.2, 0.2))
+	var bark_dark := Color(0.32, 0.24, 0.15)
+	var bark_light := Color(0.50, 0.40, 0.27)
+	var centers: Array[Vector3] = [
+		Vector3(0.0, -0.3, 0.0),
+		lean * 0.3 + Vector3(0.0, h * 0.4, 0.0),
+		lean * 0.7 + Vector3(0.0, h * 0.8, 0.0),
+		lean + Vector3(0.0, h, 0.0),
+	]
+	var radii: Array[float] = [0.16, 0.12, 0.08, 0.05]
+	var colors: Array[Color] = [bark_dark, bark_light, bark_light, bark_light]
+	_rings(st, centers, radii, colors, 5, rng, 0.04)
+	var low := Color(0.20, 0.38, 0.12)
+	var high := Color(0.42, 0.60, 0.22)
+	for i in 2:
+		var c := lean + Vector3(rng.randf_range(-0.2, 0.2), h * 0.85 + i * 0.35, rng.randf_range(-0.2, 0.2))
+		_blob(st, c, rng.randf_range(0.5, 0.75), 0.8, rng, low, high, 3, 6)
+	return st.commit()
+
+
 static func make_bush(seed_value: int) -> ArrayMesh:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
