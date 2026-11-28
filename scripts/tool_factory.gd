@@ -16,7 +16,10 @@ static func make(tool_id: String) -> Node3D:
 	mat.roughness = 1.0
 
 	_add(root, _extrude(_handle_profile(), 0.04, WOOD), mat)
-	if tool_id == "pickaxe":
+	if tool_id == "hammer":
+		_add(root, _extrude(PackedVector2Array([Vector2(-0.10, 0.36), Vector2(0.10, 0.36),
+			Vector2(0.10, 0.47), Vector2(-0.10, 0.47)]), 0.05, STONE), mat)
+	elif tool_id == "pickaxe":
 		_add(root, _extrude(_pickaxe_profile(), 0.035, STONE), mat)
 	else:
 		_add(root, _extrude(_axe_profile(), 0.045, STONE), mat)

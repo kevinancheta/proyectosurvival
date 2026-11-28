@@ -9,6 +9,7 @@ signal tool_changed(tool_id: String)         # cuando cambiás de herramienta
 
 const InventoryScript := preload("res://scripts/inventory.gd")
 const ToolFactory := preload("res://scripts/tool_factory.gd")
+const BuilderScript := preload("res://scripts/builder.gd")
 
 @export var walk_speed: float = 5.0
 @export var sprint_speed: float = 8.5
@@ -19,7 +20,7 @@ const GRAVITY := 20.0
 const REACH := 3.4              # alcance de los golpes, en metros
 const SWING_COOLDOWN := 0.55    # segundos entre golpes
 const SWING_HIT_DELAY := 0.16   # cuándo, dentro del golpe, pega de verdad
-const TOOL_IDS := ["axe", "pickaxe"]
+const TOOL_IDS := ["axe", "pickaxe", "hammer"]
 const TOOL_POS := Vector3(0.38, -0.58, -0.62)   # dónde se ve la herramienta (relativo a la cámara)
 const TOOL_REST := Vector3(-0.2, 0.0, 0.15)     # cómo la lleva en reposo
 
@@ -28,6 +29,7 @@ var current_tool := "axe"
 var head: Node3D
 var camera: Camera3D
 var tool_pivot: Node3D
+var builder                       # modo construcción (se crea con setup_building)
 
 var _tools := {}
 var _pitch := 0.0
@@ -85,6 +87,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				equip("axe")
 			elif key.keycode == KEY_2:
 				equip("pickaxe")
+			elif key.keycode == KEY_3:
+				equip("hammer")
+			elif key.keycode == KEY_Q and current_tool == "hammer":
+				builder.cycle(1)
+			elif key.keycode == KEY_R and current_tool == "hammer":
+				builder.rotate_piece()
+			elif key.keycode == KEY_E:
+				interact()
 	elif event is InputEventMouseButton:
 		var click := event as InputEventMouseButton
 		if click.pressed:
@@ -93,9 +103,15 @@ func _unhandled_input(event: InputEvent) -> void:
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 					_swing_cd = 0.4  # que el clic que vuelve al juego no cuente como golpe
 			elif click.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_cycle_tool(-1)
+				if current_tool == "hammer":
+					builder.cycle(-1)
+				else:
+					_cycle_tool(-1)
 			elif click.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_cycle_tool(1)
+				if current_tool == "hammer":
+					builder.cycle(1)
+				else:
+					_cycle_tool(1)
 
 
 func _physics_process(delta: float) -> void:
@@ -122,7 +138,10 @@ func _physics_process(delta: float) -> void:
 	_update_target()
 	if _swing_cd <= 0.0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		_start_swing()
+		if current_tool != "hammer":
+			_start_swing()
+		else:
+			_hammer_click()
 
 
 ## Lo llaman los objetos sueltos cuando los recogés.
@@ -149,6 +168,8 @@ func equip(tool_id: String) -> void:
 	_equip_tween.tween_property(tool_pivot, "position", TOOL_POS, 0.22) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_swing_cd = 0.25
+	if builder:
+		builder.set_active(current_tool == "hammer")
 	_target_text = "?"  # fuerza a actualizar el texto, que depende de la herramienta
 	tool_changed.emit(current_tool)
 
@@ -156,6 +177,15 @@ func equip(tool_id: String) -> void:
 func _cycle_tool(step: int) -> void:
 	var i := TOOL_IDS.find(current_tool)
 	equip(TOOL_IDS[(i + step + TOOL_IDS.size()) % TOOL_IDS.size()])
+
+
+## Activa la construcción. "world" es el nodo principal; "container" es donde cuelgan las piezas.
+func setup_building(world: Node3D, container: Node3D) -> void:
+	builder = BuilderScript.new()
+	builder.name = "Builder"
+	add_child(builder)
+	builder.setup(self, world, container)
+	builder.set_active(current_tool == "hammer")
 
 
 func _show_current_tool() -> void:
@@ -181,7 +211,7 @@ func _build_tools() -> void:
 func _cast() -> Dictionary:
 	var from := camera.global_position
 	var to := from - camera.global_transform.basis.z * REACH
-	var query := PhysicsRayQueryParameters3D.create(from, to, 1, [get_rid()])
+	var query := PhysicsRayQueryParameters3D.create(from, to, 1 | 16, [get_rid()])
 	return get_world_3d().direct_space_state.intersect_ray(query)
 
 
@@ -189,12 +219,29 @@ func _update_target() -> void:
 	var text := ""
 	var hit := _cast()
 	if not hit.is_empty():
-		var c = hit["collider"]
+		var c = _target_of(hit["collider"])
 		if c != null and c.has_method("get_prompt"):
 			text = c.get_prompt(current_tool)
 	if text != _target_text:
 		_target_text = text
 		target_changed.emit(text)
+
+
+## Las piezas construidas tienen su propio cuerpo de colisión: se resuelven a la pieza.
+func _target_of(c):
+	if c != null and c.has_meta("piece"):
+		return c.get_meta("piece")
+	return c
+
+
+## Tecla E: abrir una puerta, usar un cofre.
+func interact() -> void:
+	var hit := _cast()
+	if hit.is_empty():
+		return
+	var c = _target_of(hit["collider"])
+	if c != null and c.has_method("interact"):
+		c.interact(self)
 
 
 func _start_swing() -> void:
@@ -209,11 +256,30 @@ func _start_swing() -> void:
 	get_tree().create_timer(SWING_HIT_DELAY).timeout.connect(_apply_hit)
 
 
+## Martillo: si apuntás un plano le entrega materiales; si no, intenta colocar uno nuevo.
+func _hammer_click() -> void:
+	var hit := _cast()
+	var target = _target_of(hit["collider"]) if not hit.is_empty() else null
+	if target != null and "built" in target and not target.built:
+		_start_swing()
+	elif builder.try_place():
+		_start_swing_visual()
+
+
+func _start_swing_visual() -> void:
+	_swing_cd = SWING_COOLDOWN
+	if _swing_tween:
+		_swing_tween.kill()
+	_swing_tween = create_tween()
+	_swing_tween.tween_property(tool_pivot, "rotation:x", -1.3, SWING_HIT_DELAY)
+	_swing_tween.tween_property(tool_pivot, "rotation:x", TOOL_REST.x, 0.3)
+
+
 func _apply_hit() -> void:
 	var hit := _cast()
 	if hit.is_empty():
 		return
-	var c = hit["collider"]
+	var c = _target_of(hit["collider"])
 	if c != null and c.has_method("take_hit"):
 		c.take_hit(global_position, current_tool)
 

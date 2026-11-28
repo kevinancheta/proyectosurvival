@@ -49,6 +49,8 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 - `scripts/settlements.gd`: dónde van la aldea (70, 35), el castillo (125, -130), el camino de tierra y tres puestos de vigilancia.
 - `scripts/flicker.gd`: luz de fuego que titila.
 - `tests/structures_test.gd`: comprueba que se entra a las casas y al castillo (`godot --headless --path . -s res://tests/structures_test.gd`).
+- `scripts/build_catalog.gd`, `scripts/piece.gd`, `scripts/builder.gd`: construcción. El catálogo define las piezas y su costo, `piece.gd` es cada pieza (plano, materiales, vida) y `builder.gd` el fantasma y la grilla de 3 m.
+- `tests/build_test.gd`: prueba de la construcción (`godot --headless --path . -s res://tests/build_test.gd`).
 - `scripts/day_night.gd`: ciclo de día y noche (dura 10 minutos reales por día).
 
 ## Plan
@@ -59,3 +61,10 @@ La primera vez Godot tarda un momento en importar el proyecto. Si aparece algún
 4. [ ] Supervivencia: hambre, sed, frío y enemigos de noche.
 5. [ ] Servidor multijugador.
 6. [ ] Sistema de rey: trono, tributo, leyes.
+
+## Construcción (tecla 3, martillo)
+- Rueda del mouse o Q: cambiar de pieza. R: girar (techo, cofre, fogata). Clic: poner el plano.
+- Apuntá al plano con el martillo y hacé clic para entregarle troncos (y piedras) de a uno hasta completarlo.
+- Pieza: piso 4 troncos, pared 4, pared con puerta 5, techo 4, empalizada 3, fogata 2 troncos + 3 piedras, cofre 5.
+- E: abrir/cerrar puertas y usar el cofre (guarda todo o saca todo).
+- Hacha o pico sobre una pieza terminada la rompe y devuelve la mitad de los materiales; sobre un plano lo deshace.

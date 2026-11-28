@@ -319,6 +319,18 @@ static func _flame(parent: Node3D, pos: Vector3, size: float = 1.0) -> void:
 	m.vertex_color_use_as_albedo = true
 	m.vertex_color_is_srgb = true
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	# Mancha redonda y suave en vez de un cuadrado
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	tex.width = 64
+	tex.height = 64
+	m.albedo_texture = tex
 	q.material = m
 	p.mesh = q
 	parent.add_child(p)

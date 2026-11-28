@@ -20,7 +20,7 @@ const SKY_HOR_DUSK := Color(0.95, 0.55, 0.30)
 const SKY_TOP_NIGHT := Color(0.010, 0.015, 0.040)
 const SKY_HOR_NIGHT := Color(0.045, 0.055, 0.095)
 const AMBIENT_DAY := Color(0.36, 0.40, 0.46)
-const AMBIENT_NIGHT := Color(0.09, 0.12, 0.22)
+const AMBIENT_NIGHT := Color(0.15, 0.19, 0.32)
 
 
 func _ready() -> void:
@@ -108,4 +108,4 @@ func _apply() -> void:
 
 	# La luna viene del lado opuesto y da luz azulada suave de noche.
 	_moon.rotation = Vector3(-angle + PI, deg_to_rad(-30.0), 0.0)
-	_moon.light_energy = maxf(0.0, -elev) * 0.22
+	_moon.light_energy = maxf(0.0, -elev) * 0.5

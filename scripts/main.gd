@@ -34,6 +34,7 @@ var _harvest_root: Node3D
 var _clock_label: Label
 var _inv_label: Label
 var _target_label: Label
+var _build_label: Label
 var _msg_box: VBoxContainer
 var _slot_styles := {}   # estilo de cada casilla de herramienta, para marcar la activa
 
@@ -70,6 +71,10 @@ func _ready() -> void:
 	_scatter_nature()
 	_scatter_grass()
 	_spawn_player()
+	var buildings := Node3D.new()
+	buildings.name = "Buildings"
+	add_child(buildings)
+	_player.setup_building(self, buildings)
 	_build_hud()
 
 
@@ -406,7 +411,7 @@ func _build_hud() -> void:
 	layer.add_child(_clock_label)
 
 	var help := _make_label(Vector2(16, 48), 15)
-	help.text = "WASD moverte  ·  Shift correr  ·  Espacio saltar  ·  Clic izquierdo golpear  ·  1 / 2 / rueda cambiar herramienta  ·  Esc soltar el mouse"
+	help.text = "WASD moverte  ·  Shift correr  ·  Espacio saltar  ·  Clic izquierdo golpear  ·  1 / 2 / 3 cambiar herramienta (3 = martillo, para construir)  ·  E usar  ·  Esc soltar el mouse"
 	layer.add_child(help)
 
 	# Mira en el centro de la pantalla
@@ -429,12 +434,25 @@ func _build_hud() -> void:
 	_target_label.anchor_right = 0.5
 	_target_label.anchor_top = 0.5
 	_target_label.anchor_bottom = 0.5
-	_target_label.offset_left = -150.0
-	_target_label.offset_right = 150.0
+	_target_label.offset_left = -300.0
+	_target_label.offset_right = 300.0
 	_target_label.offset_top = 16.0
 	_target_label.offset_bottom = 44.0
 	_target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_target_label)
+
+	# Qué pieza estás por construir (solo con el martillo)
+	_build_label = _make_label(Vector2.ZERO, 17)
+	_build_label.anchor_left = 0.5
+	_build_label.anchor_right = 0.5
+	_build_label.anchor_top = 1.0
+	_build_label.anchor_bottom = 1.0
+	_build_label.offset_left = -420.0
+	_build_label.offset_right = 420.0
+	_build_label.offset_top = -120.0
+	_build_label.offset_bottom = -64.0
+	_build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(_build_label)
 
 	# Avisos tipo "+1 Tronco"
 	_msg_box = VBoxContainer.new()
@@ -476,15 +494,15 @@ func _build_hud() -> void:
 	bar.anchor_right = 0.5
 	bar.anchor_top = 1.0
 	bar.anchor_bottom = 1.0
-	bar.offset_left = -140.0
-	bar.offset_right = 140.0
+	bar.offset_left = -200.0
+	bar.offset_right = 200.0
 	bar.offset_bottom = -16.0
 	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	bar.add_theme_constant_override("separation", 8)
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bar)
-	for entry in [["axe", "1  Hacha"], ["pickaxe", "2  Pico"]]:
+	for entry in [["axe", "1  Hacha"], ["pickaxe", "2  Pico"], ["hammer", "3  Martillo"]]:
 		var slot := PanelContainer.new()
 		var slot_style := StyleBoxFlat.new()
 		slot_style.bg_color = Color(0.05, 0.05, 0.04, 0.55)
@@ -505,6 +523,7 @@ func _build_hud() -> void:
 	_player.target_changed.connect(_on_target_changed)
 	_player.collected.connect(_on_collected)
 	_player.tool_changed.connect(_refresh_hotbar)
+	_player.builder.info_changed.connect(func(t: String): _build_label.text = t)
 	_refresh_hotbar(_player.current_tool)
 	_player.inventory.changed.connect(_refresh_inventory)
 	_refresh_inventory()
@@ -517,7 +536,14 @@ func _refresh_hotbar(active: String) -> void:
 
 
 func _on_target_changed(text: String) -> void:
-	_target_label.text = "Clic izquierdo: " + text if text != "" else ""
+	if text == "":
+		_target_label.text = ""
+		return
+	# La primera línea es la acción del clic; las siguientes (por ejemplo "[E] Abrir") van tal cual.
+	var lines := text.split("\n")
+	if lines[0] != "":
+		lines[0] = "Clic izquierdo: " + lines[0]
+	_target_label.text = "\n".join(lines).strip_edges()
 
 
 func _on_collected(item: String, amount: int) -> void:

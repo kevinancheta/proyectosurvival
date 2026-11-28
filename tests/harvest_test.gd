@@ -70,6 +70,8 @@ func _initialize() -> void:
 	player.equip("pickaxe")
 	_check("cambiar a pico", player.current_tool == "pickaxe" and changed == ["pickaxe"])
 	player._cycle_tool(1)
+	_check("la rueda pasa al martillo", player.current_tool == "hammer")
+	player._cycle_tool(1)
 	_check("la rueda rota entre herramientas", player.current_tool == "axe")
 
 	# ---- Árbol con el pico: lento
